@@ -1,0 +1,16 @@
+[
+  {
+    "id": "1763409747660jgeotnzj8",
+    "name": "camp 1",
+    "description": "",
+    "messageTemplate": "شكرا {{name}} لزيارتنا",
+    "segmentType": "this_week",
+    "phoneNumbers": [
+      "201227072811"
+    ],
+    "status": "active",
+    "createdAt": "2025-11-17T20:02:27.660Z",
+    "updatedAt": "2025-11-17T22:06:25.501Z",
+    "lastExecutedAt": "2025-11-17T22:06:25.500Z"
+  }
+]

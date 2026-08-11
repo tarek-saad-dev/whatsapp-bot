@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign Management - WhatsApp Bot</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📱 Campaign Management</h1>
+            <p class="subtitle">Manage promotional campaigns for customer segments</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="campaigns">Campaigns</button>
+            <button class="tab-btn" data-tab="customers">Customers</button>
+            <button class="tab-btn" data-tab="create-campaign">Create Campaign</button>
+            <a href="create-offer.html" class="tab-btn" style="text-decoration: none; display: flex; align-items: center; justify-content: center;">Create Offer</a>
+            <a href="campaign-list.html" class="tab-btn" style="text-decoration: none; display: flex; align-items: center; justify-content: center;">Offer Campaigns</a>
+            <a href="templates.html" class="tab-btn" style="text-decoration: none; display: flex; align-items: center; justify-content: center;">✏️ محرر الرسائل</a>
+        </nav>
+
+        <!-- Campaigns Tab -->
+        <div id="campaigns-tab" class="tab-content active">
+            <div class="section-header">
+                <h2>All Campaigns</h2>
+                <button class="btn btn-primary" onclick="refreshCampaigns()">Refresh</button>
+            </div>
+            <div id="campaigns-list" class="campaigns-grid">
+                <!-- Campaigns will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Customers Tab -->
+        <div id="customers-tab" class="tab-content">
+            <div class="section-header">
+                <h2>Customer Management</h2>
+                <button class="btn btn-primary" onclick="showAddCustomerModal()">Add Customer</button>
+            </div>
+            <div id="customers-list" class="customers-table-container">
+                <!-- Customers will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Create Campaign Tab -->
+        <div id="create-campaign-tab" class="tab-content">
+            <div class="form-container">
+                <h2>Create New Campaign</h2>
+                <form id="create-campaign-form" onsubmit="createCampaign(event)">
+                    <div class="form-group">
+                        <label for="campaign-name">Campaign Name *</label>
+                        <input type="text" id="campaign-name" name="name" required placeholder="e.g., Thank You - Just Purchased">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="campaign-description">Description</label>
+                        <textarea id="campaign-description" name="description" rows="3" placeholder="Brief description of this campaign"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="segment-type">Customer Segment *</label>
+                        <select id="segment-type" name="segmentType" required onchange="previewSegment()">
+                            <option value="">Select a segment...</option>
+                            <option value="just_now">Just Purchased (Right Now)</option>
+                            <option value="today">Purchased/Visited Today</option>
+                            <option value="this_week">Visited This Week</option>
+                            <option value="two_weeks">Last Visit 2 Weeks Ago</option>
+                            <option value="one_month">Last Visit 1 Month Ago</option>
+                        </select>
+                        <div id="segment-preview" class="segment-preview"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="message-template">Message Template *</label>
+                        <textarea id="message-template" name="messageTemplate" rows="6" required placeholder="Enter your message template here. Use {{name}} for customer name if needed."></textarea>
+                        <small class="form-hint">Tip: Use {{name}} to personalize messages</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Create Campaign</button>
+                        <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Campaign Detail Modal -->
+    <div id="campaign-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeCampaignModal()">&times;</span>
+            <div id="campaign-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Add Customer Modal -->
+    <div id="customer-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeCustomerModal()">&times;</span>
+            <h2>Add/Edit Customer</h2>
+            <form id="customer-form" onsubmit="saveCustomer(event)">
+                <div class="form-group">
+                    <label for="customer-phone">Phone Number *</label>
+                    <input type="text" id="customer-phone" name="phone" required placeholder="e.g., 201234567890">
+                </div>
+                <div class="form-group">
+                    <label for="customer-name">Name</label>
+                    <input type="text" id="customer-name" name="name" placeholder="Customer name">
+                </div>
+                <div class="form-group">
+                    <label for="last-visit-date">Last Visit Date</label>
+                    <input type="date" id="last-visit-date" name="lastVisitDate">
+                </div>
+                <div class="form-group">
+                    <label for="last-purchase-date">Last Purchase Date</label>
+                    <input type="date" id="last-purchase-date" name="lastPurchaseDate">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Customer</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeCustomerModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

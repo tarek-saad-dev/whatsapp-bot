@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offer Summary - Campaign Management</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .summary-container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .summary-section {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .summary-section h3 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .info-item {
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .info-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #333;
+        }
+        .audience-preview {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .audience-item {
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
+        .message-preview {
+            padding: 15px;
+            background: #e7f3ff;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+        .stat-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 5px;
+        }
+        .stat-badge.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .stat-badge.warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .stat-badge.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Offer Summary</h1>
+            <p class="subtitle" id="offer-name">Loading offer details...</p>
+        </header>
+
+        <a href="index.html" class="back-link">← Back to Dashboard</a>
+
+        <div class="summary-container">
+            <div id="loading" style="text-align: center; padding: 40px;">
+                <p>Loading summary...</p>
+            </div>
+
+            <div id="summary-content" style="display: none;">
+                <!-- Offer Details -->
+                <div class="summary-section">
+                    <h3>📦 Offer Details</h3>
+                    <div class="info-grid" id="offer-details"></div>
+                </div>
+
+                <!-- Targeting Rules -->
+                <div class="summary-section">
+                    <h3>🎯 Targeting Rules</h3>
+                    <div id="targeting-rules"></div>
+                </div>
+
+                <!-- Audience -->
+                <div class="summary-section">
+                    <h3>👥 Target Audience</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label">Total Audience</div>
+                            <div class="info-value" id="audience-count">0</div>
+                        </div>
+                    </div>
+                    <div id="audience-preview-container">
+                        <h4 style="margin-top: 20px;">Preview (First 5)</h4>
+                        <div class="audience-preview" id="audience-preview"></div>
+                    </div>
+                </div>
+
+                <!-- Message Preview -->
+                <div class="summary-section">
+                    <h3>💬 Message Preview</h3>
+                    <div class="message-preview" id="message-preview"></div>
+                </div>
+
+                <!-- Actions -->
+                <div class="action-buttons">
+                    <button onclick="createCampaign()" class="btn btn-primary">Create Campaign</button>
+                    <button onclick="refreshSummary()" class="btn btn-secondary">Refresh</button>
+                    <a href="campaign-list.html" class="btn btn-secondary">View Campaigns</a>
+                </div>
+            </div>
+        </div>
+
+        <div id="success-message" class="alert alert-success" style="display: none; margin-top: 20px;"></div>
+        <div id="error-message" class="alert alert-error" style="display: none; margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const urlParams = new URLSearchParams(window.location.search);
+        const offerId = urlParams.get('offerId');
+
+        if (!offerId) {
+            alert('No offer ID provided. Redirecting...');
+            window.location.href = 'index.html';
+        }
+
+        async function loadSummary() {
+            try {
+                const response = await fetch(`${API_BASE}/offers/${offerId}/summary`);
+                if (!response.ok) {
+                    throw new Error('Failed to load summary');
+                }
+
+                const summary = await response.json();
+                displaySummary(summary);
+            } catch (error) {
+                document.getElementById('loading').innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        function displaySummary(summary) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('summary-content').style.display = 'block';
+
+            // Offer name
+            document.getElementById('offer-name').textContent = summary.offer.name;
+
+            // Offer details
+            const offerDetails = document.getElementById('offer-details');
+            offerDetails.innerHTML = `
+                <div class="info-item">
+                    <div class="info-label">Name</div>
+                    <div class="info-value">${summary.offer.name}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Status</div>
+                    <div class="info-value">
+                        <span class="stat-badge ${summary.offer.status === 'active' ? 'success' : 'warning'}">
+                            ${summary.offer.status}
+                        </span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Age Range</div>
+                    <div class="info-value">${summary.offer.minAge || 'N/A'} - ${summary.offer.maxAge || 'N/A'}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Form URL</div>
+                    <div class="info-value">${summary.offer.formUrl ? 'Yes' : 'No'}</div>
+                </div>
+            `;
+
+            // Targeting rules
+            const targetingRules = document.getElementById('targeting-rules');
+            if (summary.targeting && summary.targeting.length > 0) {
+                targetingRules.innerHTML = summary.targeting.map((rule, index) => `
+                    <div style="padding: 15px; margin: 10px 0; background: #f8f9fa; border-radius: 4px;">
+                        <strong>Rule ${index + 1}</strong>
+                        <div style="margin-top: 8px; font-size: 0.9em;">
+                            ${Object.entries(rule).filter(([k, v]) => v !== null && k !== 'id').map(([k, v]) => 
+                                `<span class="stat-badge info">${k}: ${v}</span>`
+                            ).join(' ')}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                targetingRules.innerHTML = '<p>No targeting rules defined.</p>';
+            }
+
+            // Audience
+            document.getElementById('audience-count').textContent = summary.audienceCount || 0;
+            const audiencePreview = document.getElementById('audience-preview');
+            if (summary.audiencePreview && summary.audiencePreview.length > 0) {
+                audiencePreview.innerHTML = summary.audiencePreview.map(member => `
+                    <div class="audience-item">
+                        <strong>${member.name || 'Unknown'}</strong><br>
+                        <small>${member.phone}</small>
+                    </div>
+                `).join('');
+            } else {
+                audiencePreview.innerHTML = '<p>No audience preview available. Build audience first.</p>';
+            }
+
+            // Message preview
+            document.getElementById('message-preview').textContent = summary.messagePreview || 'No preview available';
+        }
+
+        async function createCampaign() {
+            if (!confirm('Create a campaign from this offer?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/campaigns`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ offerId })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess(`✅ Campaign created! ID: ${result.id}`);
+                    setTimeout(() => {
+                        window.location.href = `campaign-details.html?campaignId=${result.id}`;
+                    }, 1500);
+                } else {
+                    showError(`❌ Error: ${result.error || 'Failed to create campaign'}`);
+                }
+            } catch (error) {
+                showError(`❌ Error: ${error.message}`);
+            }
+        }
+
+        function refreshSummary() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('summary-content').style.display = 'none';
+            loadSummary();
+        }
+
+        function showSuccess(message) {
+            const el = document.getElementById('success-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showError(message) {
+            const el = document.getElementById('error-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        // Initialize
+        loadSummary();
+    </script>
+</body>
+</html>
+
+
+

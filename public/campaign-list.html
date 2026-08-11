@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign List - Campaign Management</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        .campaigns-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .campaign-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #007bff;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .campaign-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .campaign-card.completed {
+            border-left-color: #28a745;
+        }
+        .campaign-card.sending {
+            border-left-color: #ffc107;
+        }
+        .campaign-card.draft {
+            border-left-color: #6c757d;
+        }
+        .campaign-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+        }
+        .campaign-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin: 0;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        .status-badge.draft {
+            background: #e9ecef;
+            color: #495057;
+        }
+        .status-badge.sending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status-badge.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+        .campaign-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 5px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #007bff;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <div>
+                <h1>📋 Campaign List</h1>
+                <p class="subtitle">View and manage all your campaigns</p>
+            </div>
+            <div>
+                <a href="create-offer.html" class="btn btn-primary">Create New Offer</a>
+                <button onclick="refreshCampaigns()" class="btn btn-secondary">Refresh</button>
+            </div>
+        </div>
+
+        <div id="loading" style="text-align: center; padding: 40px;">
+            <p>Loading campaigns...</p>
+        </div>
+
+        <div id="campaigns-container" style="display: none;">
+            <div class="campaigns-grid" id="campaigns-grid"></div>
+            <div id="empty-state" style="display: none; text-align: center; padding: 60px;">
+                <p style="font-size: 1.2em; color: #666;">No campaigns found.</p>
+                <a href="create-offer.html" class="btn btn-primary" style="margin-top: 20px;">Create Your First Offer</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+
+        async function loadCampaigns() {
+            try {
+                const response = await fetch(`${API_BASE}/campaigns/offers`);
+                if (!response.ok) {
+                    throw new Error('Failed to load campaigns');
+                }
+
+                const campaigns = await response.json();
+                displayCampaigns(campaigns);
+            } catch (error) {
+                document.getElementById('loading').innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        async function displayCampaigns(campaigns) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('campaigns-container').style.display = 'block';
+
+            const grid = document.getElementById('campaigns-grid');
+            const emptyState = document.getElementById('empty-state');
+
+            if (!campaigns || campaigns.length === 0) {
+                grid.style.display = 'none';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            grid.style.display = 'grid';
+            emptyState.style.display = 'none';
+
+            // Load message stats for each campaign
+            const campaignsWithStats = await Promise.all(
+                campaigns.map(async (campaign) => {
+                    try {
+                        const statsResponse = await fetch(`${API_BASE}/campaigns/offers/${campaign.id}/stats`);
+                        if (statsResponse.ok) {
+                            const stats = await statsResponse.json();
+                            return { ...campaign, messageStats: stats.messages };
+                        }
+                    } catch (error) {
+                        console.error(`Error loading stats for campaign ${campaign.id}:`, error);
+                    }
+                    return { ...campaign, messageStats: { total: 0, pending: 0, sent: 0, failed: 0 } };
+                })
+            );
+
+            grid.innerHTML = campaignsWithStats.map(campaign => {
+                const stats = campaign.messageStats || { total: 0, pending: 0, sent: 0, failed: 0 };
+                const progress = stats.total > 0 ? ((stats.sent + stats.failed) / stats.total * 100) : 0;
+
+                return `
+                    <div class="campaign-card ${campaign.status}" onclick="viewCampaign('${campaign.id}')">
+                        <div class="campaign-header">
+                            <div>
+                                <div class="campaign-title">Campaign ${campaign.id.substring(0, 8)}...</div>
+                                <small style="color: #666;">Offer ID: ${campaign.offerId.substring(0, 8)}...</small>
+                            </div>
+                            <span class="status-badge ${campaign.status}">${campaign.status}</span>
+                        </div>
+                        <div class="campaign-stats">
+                            <div class="stat-item">
+                                <div class="stat-value">${campaign.totalRecipients || 0}</div>
+                                <div class="stat-label">Total</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" style="color: #28a745;">${stats.sent || 0}</div>
+                                <div class="stat-label">Sent</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" style="color: #dc3545;">${stats.failed || 0}</div>
+                                <div class="stat-label">Failed</div>
+                            </div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${progress}%"></div>
+                        </div>
+                        <div style="margin-top: 15px; font-size: 0.9em; color: #666;">
+                            Created: ${new Date(campaign.createdAt).toLocaleDateString()}
+                            ${campaign.startedAt ? `<br>Started: ${new Date(campaign.startedAt).toLocaleDateString()}` : ''}
+                            ${campaign.completedAt ? `<br>Completed: ${new Date(campaign.completedAt).toLocaleDateString()}` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function viewCampaign(campaignId) {
+            window.location.href = `campaign-details.html?campaignId=${campaignId}`;
+        }
+
+        function refreshCampaigns() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('campaigns-container').style.display = 'none';
+            loadCampaigns();
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(refreshCampaigns, 30000);
+
+        // Initialize
+        loadCampaigns();
+    </script>
+</body>
+</html>
+
+
+

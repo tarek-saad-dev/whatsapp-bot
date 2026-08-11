@@ -1,0 +1,33 @@
+node_modules
+
+.history
+
+chrome-profile
+
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# WhatsApp / Chrome sessions
+chrome-profile*/
+session/
+sessions/
+auth/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Customer/contact data
+contacts.xlsx
+contacts*.xlsx
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

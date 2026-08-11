@@ -1,0 +1,101 @@
+[
+  {
+    "id": "1763920078740st0x6ii8w",
+    "offerId": "1763917725219kxleeexme",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T17:47:58.740Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1763920724455535mzuet1",
+    "offerId": "1763917725219kxleeexme",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T17:58:44.455Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1763921077936le73fkemi",
+    "offerId": "1763917725219kxleeexme",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T18:04:37.936Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1763921085934fj68x9w10",
+    "offerId": "1763917725219kxleeexme",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T18:04:45.934Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1763921094002p61z25eqi",
+    "offerId": "1763917725219kxleeexme",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T18:04:54.002Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1763921094262p62vq92l2",
+    "offerId": "1763917725219kxleeexme",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T18:04:54.262Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "17639288732519qq63g3rs",
+    "offerId": "1763928789370wxk7d6lzu",
+    "status": "completed",
+    "totalRecipients": 6,
+    "sentCount": 6,
+    "failedCount": 0,
+    "createdAt": "2025-11-23T20:14:33.251Z",
+    "startedAt": null,
+    "completedAt": "2025-11-23T20:16:06.582Z"
+  },
+  {
+    "id": "1764193429813tyhe7dblr",
+    "offerId": "17641933226508exxrjl0z",
+    "status": "completed",
+    "totalRecipients": 393,
+    "sentCount": 393,
+    "failedCount": 0,
+    "createdAt": "2025-11-26T21:43:49.813Z",
+    "startedAt": "2025-11-26T21:44:08.822Z",
+    "completedAt": "2025-11-27T00:26:10.986Z"
+  },
+  {
+    "id": "1764270176290d4l7qtpe1",
+    "offerId": "1764270152790u6jr6rskq",
+    "status": "draft",
+    "totalRecipients": 883,
+    "sentCount": 89,
+    "failedCount": 0,
+    "createdAt": "2025-11-27T19:02:56.290Z",
+    "startedAt": null,
+    "completedAt": null
+  }
+]

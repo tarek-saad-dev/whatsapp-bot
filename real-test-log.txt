@@ -1,0 +1,36 @@
+Sending sale message...
+Sending booking message...
+Sending first_time message...
+Results saved to C:\Users\user\Desktop\whatsapp-bot-node\real-test-results.json
+[
+  {
+    "type": "sale",
+    "durationMs": 121019,
+    "status": 503,
+    "response": {
+      "success": false,
+      "error": "WhatsApp Web is not ready. Please scan the QR code and try again.",
+      "phone": "201557994946"
+    }
+  },
+  {
+    "type": "booking",
+    "durationMs": 123696,
+    "status": 503,
+    "response": {
+      "success": false,
+      "error": "WhatsApp Web is not ready. Please scan the QR code and try again.",
+      "phone": "201557994946"
+    }
+  },
+  {
+    "type": "first_time",
+    "durationMs": 121573,
+    "status": 503,
+    "response": {
+      "success": false,
+      "error": "WhatsApp Web is not ready. Please scan the QR code and try again.",
+      "phone": "201557994946"
+    }
+  }
+]

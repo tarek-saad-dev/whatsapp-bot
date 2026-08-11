@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Offer - Campaign Management</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .form-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .form-actions {
+            margin-top: 30px;
+            display: flex;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📦 Create New Offer</h1>
+            <p class="subtitle">Create a promotional offer for your campaigns</p>
+        </header>
+
+        <a href="index.html" class="back-link">← Back to Dashboard</a>
+
+        <div class="form-container">
+            <form id="create-offer-form" onsubmit="createOffer(event)">
+                <div class="form-group">
+                    <label for="offer-name">Offer Name *</label>
+                    <input type="text" id="offer-name" name="name" required placeholder="e.g., Summer Sale 2024">
+                </div>
+
+                <div class="form-group">
+                    <label for="offer-description">Description</label>
+                    <textarea id="offer-description" name="description" rows="4" placeholder="Describe the offer details..."></textarea>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="min-age">Minimum Age</label>
+                        <input type="number" id="min-age" name="minAge" min="0" max="120" placeholder="e.g., 18">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="max-age">Maximum Age</label>
+                        <input type="number" id="max-age" name="maxAge" min="0" max="120" placeholder="e.g., 65">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="form-url">Form URL (Optional)</label>
+                    <input type="url" id="form-url" name="formUrl" placeholder="https://forms.google.com/...">
+                    <small class="form-hint">Link to registration form if applicable</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="offer-status">Status *</label>
+                    <select id="offer-status" name="status" required>
+                        <option value="draft">Draft</option>
+                        <option value="active">Active</option>
+                        <option value="expired">Expired</option>
+                    </select>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Create Offer</button>
+                    <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
+                    <a href="index.html" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+
+        <div id="success-message" class="alert alert-success" style="display: none; margin-top: 20px;"></div>
+        <div id="error-message" class="alert alert-error" style="display: none; margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+
+        function resetForm() {
+            document.getElementById('create-offer-form').reset();
+            hideMessages();
+        }
+
+        function hideMessages() {
+            document.getElementById('success-message').style.display = 'none';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showSuccess(message) {
+            const el = document.getElementById('success-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showError(message) {
+            const el = document.getElementById('error-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        async function createOffer(event) {
+            event.preventDefault();
+            hideMessages();
+
+            const formData = new FormData(event.target);
+            const data = {
+                name: formData.get('name'),
+                description: formData.get('description') || '',
+                minAge: formData.get('minAge') ? parseInt(formData.get('minAge')) : null,
+                maxAge: formData.get('maxAge') ? parseInt(formData.get('maxAge')) : null,
+                formUrl: formData.get('formUrl') || null,
+                status: formData.get('status') || 'draft'
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/offers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess(`✅ Offer created successfully! ID: ${result.id}`);
+                    setTimeout(() => {
+                        window.location.href = `offer-targeting.html?offerId=${result.id}`;
+                    }, 1500);
+                } else {
+                    showError(`❌ Error: ${result.error || 'Failed to create offer'}`);
+                }
+            } catch (error) {
+                showError(`❌ Error: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
+
+
+

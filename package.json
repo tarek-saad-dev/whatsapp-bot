@@ -1,0 +1,58 @@
+{
+  "name": "whatsapp-bot-node",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
+    "test:api": "vitest run tests/api",
+    "test:integration": "vitest run tests/integration",
+    "test:whatsapp": "vitest run tests/whatsapp",
+    "start": "node server.js",
+    "bot": "node bot.js",
+    "campaign": "node bot-campaign.js",
+    "build:exe": "pkg launcher.js --targets node18-win-x64 --output whatsapp-bot-server.exe",
+    "build:exe:all": "pkg launcher.js --targets node18-win-x64,node18-win-x86 --output whatsapp-bot-server.exe"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "chromedriver": "^142.0.2",
+    "dotenv": "^17.2.3",
+    "express": "^4.18.2",
+    "mssql": "^11.0.1",
+    "selenium-webdriver": "^4.38.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "pkg": "^5.8.1",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.9"
+  },
+  "pkg": {
+    "assets": [
+      ".env",
+      "public/**/*",
+      "routes/**/*",
+      "services/**/*",
+      "models/**/*",
+      "data/**/*"
+    ],
+    "scripts": [
+      "server.js",
+      "routes/**/*.js",
+      "services/**/*.js",
+      "models/**/*.js"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  }
+}

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offer Targeting - Campaign Management</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .form-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .targeting-rules-list {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .rule-item {
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid #007bff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .rule-details {
+            flex: 1;
+        }
+        .rule-actions {
+            display: flex;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Offer Targeting Rules</h1>
+            <p class="subtitle" id="offer-info">Configure targeting rules for your offer</p>
+        </header>
+
+        <a href="index.html" class="back-link">← Back to Dashboard</a>
+
+        <div class="form-container">
+            <h2>Add Targeting Rule</h2>
+            <form id="targeting-form" onsubmit="addTargetingRule(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="gender">Gender</label>
+                        <select id="gender" name="gender">
+                            <option value="">Any</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="city">City</label>
+                        <input type="text" id="city" name="city" placeholder="e.g., ميامي">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="marital-status">Marital Status</label>
+                    <input type="text" id="marital-status" name="maritalStatus" placeholder="e.g., متزوج">
+                </div>
+
+                <div class="form-group">
+                    <label for="came-from">Came From</label>
+                    <input type="text" id="came-from" name="cameFrom" placeholder="e.g., ميامي">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="last-visit-from">Last Visit From</label>
+                        <input type="date" id="last-visit-from" name="lastVisitFrom">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="last-visit-to">Last Visit To</label>
+                        <input type="date" id="last-visit-to" name="lastVisitTo">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="min-visits">Minimum Visits</label>
+                        <input type="number" id="min-visits" name="minVisits" min="0" placeholder="e.g., 1">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="min-spend">Minimum Spend</label>
+                        <input type="number" id="min-spend" name="minSpend" min="0" step="0.01" placeholder="e.g., 100.00">
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Add Targeting Rule</button>
+                    <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
+                </div>
+            </form>
+
+            <div class="targeting-rules-list" id="rules-list">
+                <h3>Current Targeting Rules</h3>
+                <div id="rules-container">Loading...</div>
+            </div>
+
+            <div class="form-actions" style="margin-top: 30px;">
+                <button onclick="buildAudience()" class="btn btn-primary">Build Audience</button>
+                <a href="offer-summary.html" id="summary-link" class="btn btn-secondary" style="display: none;">View Summary →</a>
+            </div>
+        </div>
+
+        <div id="success-message" class="alert alert-success" style="display: none; margin-top: 20px;"></div>
+        <div id="error-message" class="alert alert-error" style="display: none; margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const urlParams = new URLSearchParams(window.location.search);
+        const offerId = urlParams.get('offerId');
+
+        if (!offerId) {
+            alert('No offer ID provided. Redirecting to create offer...');
+            window.location.href = 'create-offer.html';
+        }
+
+        // Load offer info
+        async function loadOfferInfo() {
+            try {
+                const response = await fetch(`${API_BASE}/offers/${offerId}`);
+                if (response.ok) {
+                    const offer = await response.json();
+                    document.getElementById('offer-info').textContent = `Configure targeting for: ${offer.name}`;
+                }
+            } catch (error) {
+                console.error('Error loading offer:', error);
+            }
+        }
+
+        // Load targeting rules
+        async function loadTargetingRules() {
+            try {
+                const response = await fetch(`${API_BASE}/offers/${offerId}/targeting`);
+                if (response.ok) {
+                    const rules = await response.json();
+                    displayRules(rules);
+                } else {
+                    document.getElementById('rules-container').innerHTML = '<p>No targeting rules yet. Add one above.</p>';
+                }
+            } catch (error) {
+                document.getElementById('rules-container').innerHTML = '<p>Error loading rules.</p>';
+            }
+        }
+
+        function displayRules(rules) {
+            const container = document.getElementById('rules-container');
+            if (!rules || rules.length === 0) {
+                container.innerHTML = '<p>No targeting rules yet. Add one above.</p>';
+                return;
+            }
+
+            container.innerHTML = rules.map((rule, index) => `
+                <div class="rule-item">
+                    <div class="rule-details">
+                        <strong>Rule ${index + 1}</strong>
+                        <div style="margin-top: 8px; font-size: 0.9em; color: #666;">
+                            ${rule.gender ? `Gender: ${rule.gender} | ` : ''}
+                            ${rule.city ? `City: ${rule.city} | ` : ''}
+                            ${rule.maritalStatus ? `Status: ${rule.maritalStatus} | ` : ''}
+                            ${rule.cameFrom ? `From: ${rule.cameFrom} | ` : ''}
+                            ${rule.minVisits ? `Min Visits: ${rule.minVisits} | ` : ''}
+                            ${rule.minSpend ? `Min Spend: ${rule.minSpend} | ` : ''}
+                            ${rule.lastVisitFrom || rule.lastVisitTo ? `Visit: ${rule.lastVisitFrom || 'any'} to ${rule.lastVisitTo || 'any'}` : ''}
+                        </div>
+                    </div>
+                    <div class="rule-actions">
+                        <button onclick="deleteRule('${rule.id}')" class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.9em;">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function resetForm() {
+            document.getElementById('targeting-form').reset();
+            hideMessages();
+        }
+
+        function hideMessages() {
+            document.getElementById('success-message').style.display = 'none';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showSuccess(message) {
+            const el = document.getElementById('success-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showError(message) {
+            const el = document.getElementById('error-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        async function addTargetingRule(event) {
+            event.preventDefault();
+            hideMessages();
+
+            const formData = new FormData(event.target);
+            const data = {
+                gender: formData.get('gender') || null,
+                city: formData.get('city') || null,
+                maritalStatus: formData.get('maritalStatus') || null,
+                cameFrom: formData.get('cameFrom') || null,
+                lastVisitFrom: formData.get('lastVisitFrom') || null,
+                lastVisitTo: formData.get('lastVisitTo') || null,
+                minVisits: formData.get('minVisits') ? parseInt(formData.get('minVisits')) : null,
+                minSpend: formData.get('minSpend') ? parseFloat(formData.get('minSpend')) : null
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/offers/${offerId}/targeting`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess('✅ Targeting rule added successfully!');
+                    resetForm();
+                    loadTargetingRules();
+                } else {
+                    showError(`❌ Error: ${result.error || 'Failed to add targeting rule'}`);
+                }
+            } catch (error) {
+                showError(`❌ Error: ${error.message}`);
+            }
+        }
+
+        async function deleteRule(ruleId) {
+            if (!confirm('Are you sure you want to delete this targeting rule?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/offers/${offerId}/targeting/${ruleId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showSuccess('✅ Targeting rule deleted!');
+                    loadTargetingRules();
+                } else {
+                    showError('❌ Failed to delete rule');
+                }
+            } catch (error) {
+                showError(`❌ Error: ${error.message}`);
+            }
+        }
+
+        async function buildAudience() {
+            hideMessages();
+            showSuccess('⏳ Building audience... This may take a moment.');
+
+            try {
+                const response = await fetch(`${API_BASE}/offers/${offerId}/build-audience`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess(`✅ Audience built successfully! Found ${result.audienceCount} matching clients.`);
+                    document.getElementById('summary-link').href = `offer-summary.html?offerId=${offerId}`;
+                    document.getElementById('summary-link').style.display = 'inline-block';
+                } else {
+                    showError(`❌ Error: ${result.error || 'Failed to build audience'}`);
+                }
+            } catch (error) {
+                showError(`❌ Error: ${error.message}`);
+            }
+        }
+
+        // Initialize
+        loadOfferInfo();
+        loadTargetingRules();
+    </script>
+</body>
+</html>
+
+
+

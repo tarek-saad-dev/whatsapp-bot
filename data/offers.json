@@ -1,0 +1,79 @@
+[
+  {
+    "id": "1763917725219kxleeexme",
+    "name": "Test Offer – July",
+    "description": "",
+    "minAge": 18,
+    "maxAge": 40,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2025-11-23T17:08:45.219Z",
+    "updatedAt": "2025-11-23T17:08:45.219Z"
+  },
+  {
+    "id": "1763921951354zzjuy0646",
+    "name": "best friends offer",
+    "description": "get 2 of your friends and get 150 EGY",
+    "minAge": 10,
+    "maxAge": 100,
+    "formUrl": null,
+    "status": "active",
+    "createdAt": "2025-11-23T18:19:11.354Z",
+    "updatedAt": "2025-11-23T18:19:11.354Z"
+  },
+  {
+    "id": "1763928789370wxk7d6lzu",
+    "name": "best friends offer",
+    "description": "get 2 of your friends and get 150 EGY",
+    "minAge": 10,
+    "maxAge": 100,
+    "formUrl": null,
+    "status": "active",
+    "createdAt": "2025-11-23T20:13:09.370Z",
+    "updatedAt": "2025-11-23T20:13:09.371Z"
+  },
+  {
+    "id": "1764193112495834hw64kn",
+    "name": "150 EGY - Grooming Pakage",
+    "description": "Last 3 Days Offer – Full Package 150 EGP\n\nPremium grooming for a crazy price\n\nOriginal 530 → Now 150 only\n\nCut Salon Gleem – Book Now",
+    "minAge": 15,
+    "maxAge": 40,
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLScW7RevKMLbzeyrbllLv8DU0v6Z9DwBFN69wUhWB3g57eGByA/viewform?usp=publish-editor",
+    "status": "active",
+    "createdAt": "2025-11-26T21:38:32.495Z",
+    "updatedAt": "2025-11-26T21:38:32.495Z"
+  },
+  {
+    "id": "17641933226508exxrjl0z",
+    "name": "150 EGY - Grooming Pakageeee",
+    "description": "عرض آخر 3 أيام – الباقة الكاملة بـ 150 جنيه\nجودة حلاقة مميزة بسعر استثنائيnالسعر الأصلي 530 → الآن 150 فقط\nCut Salon جليم – احجز الآن",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLScW7RevKMLbzeyrbllLv8DU0v6Z9DwBFN69wUhWB3g57eGByA/viewform?usp=publish-editor",
+    "status": "active",
+    "createdAt": "2025-11-26T21:42:02.650Z",
+    "updatedAt": "2025-11-26T21:42:02.650Z"
+  },
+  {
+    "id": "17642699037595s3foeodf",
+    "name": "The 150 EGY - Grooming Pakage",
+    "description": "عرض آخر 3 أيام – الباقة الكاملة بـ 150 جنيه\nجودة حلاقة مميزة بسعر استثنائي\nOriginal 530 → Now 150 only\nالعرض متاح فقط فى فرع جليم – احجز الآن",
+    "minAge": 15,
+    "maxAge": 100,
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLScW7RevKMLbzeyrbllLv8DU0v6Z9DwBFN69wUhWB3g57eGByA/viewform?usp=publish-editor",
+    "status": "active",
+    "createdAt": "2025-11-27T18:58:23.759Z",
+    "updatedAt": "2025-11-27T18:58:23.759Z"
+  },
+  {
+    "id": "1764270152790u6jr6rskq",
+    "name": "The 150 EGY - Grooming Pakage",
+    "description": "عرض آخر 3 أيام – الباقة الكاملة بـ 150 جنيه\nجودة حلاقة مميزة بسعر استثنائي\nOriginal 530 → Now 150 only\nالعرض متاح فقط فى فرع جليم – احجز الآن",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLScW7RevKMLbzeyrbllLv8DU0v6Z9DwBFN69wUhWB3g57eGByA/viewform?usp=publish-editor",
+    "status": "active",
+    "createdAt": "2025-11-27T19:02:32.790Z",
+    "updatedAt": "2025-11-27T19:02:32.790Z"
+  }
+]

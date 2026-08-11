@@ -1,0 +1,30 @@
+[
+  {
+    "id": "c1",
+    "phone": "201234567890",
+    "name": "Alice",
+    "lastVisitDate": "2026-01-15",
+    "lastPurchaseDate": "2026-01-15"
+  },
+  {
+    "id": "c2",
+    "phone": "201000111222",
+    "name": "Bob",
+    "lastVisitDate": "2026-01-14",
+    "lastPurchaseDate": "2026-01-10"
+  },
+  {
+    "id": "c3",
+    "phone": "201333444555",
+    "name": "Charlie",
+    "lastVisitDate": "2025-12-20",
+    "lastPurchaseDate": "2025-12-20"
+  },
+  {
+    "id": "c4",
+    "phone": "201555994946",
+    "name": "Approved Test",
+    "lastVisitDate": "2026-01-16",
+    "lastPurchaseDate": "2026-01-16"
+  }
+]

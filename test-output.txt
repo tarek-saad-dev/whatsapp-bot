@@ -1,0 +1,886 @@
+
+> whatsapp-bot-node@1.0.0 test
+> vitest run
+
+[dotenv@17.2.3] injecting env (22) from .env.test -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mC:/Users/user/Desktop/whatsapp-bot-node[39m
+
+[90mstdout[2m | tests/api/sales.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+
+[90mstdout[2m | tests/api/sales.test.js
+[22m[39m[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+
+[90mstdout[2m | tests/api/sales.test.js[2m > [22m[2mSales API[2m > [22m[2mPOST /api/sales/notify queues a WhatsApp message
+[22m[39m📥 Received notification request at 2026-06-23T00:53:31.879Z
+📱 Processing sale notification for phone: 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 0
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 1 message(s)
+🔄 Starting WhatsApp initialization...
+🚀 Starting Chrome driver creation...
+ℹ️  No bot-owned Chrome PIDs to kill
+🚀 Starting driver creation process...
+🧹 Cleaning profile directory: C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+✅ Profile directory cleaned
+⚠️  Using fresh profile (keepLogin=false): C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+🔧 Building isolated Chrome driver...
+   Profile dir : C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+   Sub-profile : BotProfile
+   Debug port  : 9232
+   🔒 Fully isolated — your personal Chrome will NOT be affected
+🔄 Starting queue processor (checking every 3 seconds)...
+✅ Sending immediate response for phone: 201234567890
+
+[90mstdout[2m | tests/api/sales.test.js[2m > [22m[2mSales API[2m > [22m[2mPOST /api/sales/send-message queues a WhatsApp message
+[22m[39m📨 sendMessage called for 201234567890, driver ready: false, queue length: 1
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 2 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/api/sales.test.js[2m > [22m[2mSales API[2m > [22m[2mPOST /api/sales/notify for first_time customers also sends SMS
+[22m[39m📥 Received notification request at 2026-06-23T00:53:32.158Z
+📱 Processing first_time notification for phone: 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 2
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 3 message(s)
+⏳ WhatsApp initialization already in progress...
+📱 Sending SMS to 201234567890 via SMS Hub...
+📱 SMS also queued for first-time customer: 201234567890
+✅ Sending immediate response for phone: 201234567890
+
+[90mstdout[2m | tests/api/sales.test.js[2m > [22m[2mSales API[2m > [22m[2mPOST /api/sales/reinitialize resets the WhatsApp driver
+[22m[39mℹ️  No bot-owned Chrome PIDs to kill
+🚀 Starting Chrome driver creation...
+ℹ️  No bot-owned Chrome PIDs to kill
+🚀 Starting driver creation process...
+🧹 Cleaning profile directory: C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+✅ Profile directory cleaned
+⚠️  Using fresh profile (keepLogin=false): C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+🔧 Building isolated Chrome driver...
+   Profile dir : C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+   Sub-profile : BotProfile
+   Debug port  : 9301
+   🔒 Fully isolated — your personal Chrome will NOT be affected
+
+ [31m❯[39m tests/api/sales.test.js [2m([22m[2m7 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[33m 966[2mms[22m[39m
+     [32m✓[39m POST /api/sales/notify without token returns 401[32m 53[2mms[22m[39m
+[31m     [31m×[31m POST /api/sales/notify queues a WhatsApp message[39m[32m 254[2mms[22m[39m
+[31m     [31m×[31m POST /api/sales/send-message queues a WhatsApp message[39m[32m 10[2mms[22m[39m
+     [32m✓[39m POST /api/sales/send-message requires phone and message[32m 7[2mms[22m[39m
+     [32m✓[39m GET /api/sales/status returns WhatsApp readiness[32m 11[2mms[22m[39m
+[31m     [31m×[31m POST /api/sales/notify for first_time customers also sends SMS[39m[32m 89[2mms[22m[39m
+     [33m[2m✓[22m[39m POST /api/sales/reinitialize resets the WhatsApp driver [33m 538[2mms[22m[39m
+[90mstdout[2m | tests/unit/worker.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+
+[90mstdout[2m | tests/unit/worker.test.js
+[22m[39m[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses a single message successfully
+[22m[39m🔄 Processing 1 messages for campaign 1782176013445n63iep2bn
+🔄 Processing batch of 1 messages...
+📤 Processing message 1782176013447y3kczml2f for phone 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 0
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 1 message(s)
+🔄 Starting WhatsApp initialization...
+🚀 Starting Chrome driver creation...
+ℹ️  No bot-owned Chrome PIDs to kill
+🚀 Starting driver creation process...
+🧹 Cleaning profile directory: C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+✅ Profile directory cleaned
+⚠️  Using fresh profile (keepLogin=false): C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+🔧 Building isolated Chrome driver...
+   Profile dir : C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+   Sub-profile : BotProfile
+   Debug port  : 9250
+   🔒 Fully isolated — your personal Chrome will NOT be affected
+🔄 Starting queue processor (checking every 3 seconds)...
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses a single message successfully
+[22m[39m✅ Message 1782176013447y3kczml2f sent successfully to 201234567890
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses a single message successfully
+[22m[39m✅ Batch complete: 1 succeeded, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses a single message successfully
+[22m[39m✅ Campaign 1782176013445n63iep2bn completed: 1 sent, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage fails
+[22m[39m🔄 Processing 1 messages for campaign 1782176013691pzj7ruiwq
+🔄 Processing batch of 1 messages...
+📤 Processing message 1782176013691i3pyl12j6 for phone 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 1
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 2 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage fails
+[22m[39m✅ Message 1782176013691i3pyl12j6 sent successfully to 201234567890
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage fails
+[22m[39m✅ Batch complete: 1 succeeded, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage fails
+[22m[39m✅ Campaign 1782176013691pzj7ruiwq completed: 1 sent, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage throws
+[22m[39m🔄 Processing 1 messages for campaign 1782176013707fn5wx1t6y
+🔄 Processing batch of 1 messages...
+📤 Processing message 17821760137084fk6dfyv6 for phone 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 2
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 3 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage throws
+[22m[39m✅ Message 17821760137084fk6dfyv6 sent successfully to 201234567890
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage throws
+[22m[39m✅ Batch complete: 1 succeeded, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mmarks a message as failed when sendMessage throws
+[22m[39m✅ Campaign 1782176013707fn5wx1t6y completed: 1 sent, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m🔄 Processing 2 messages for campaign 1782176013716lsherxpe9
+🔄 Processing batch of 2 messages...
+📤 Processing message 1782176013717d7k1prq2fmj1 for phone 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 3
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 4 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m✅ Message 1782176013717d7k1prq2fmj1 sent successfully to 201234567890
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m   ⏳ Waiting 0s before next message...
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m📤 Processing message 1782176013717dpqvg198sahl for phone 201000111222
+📨 sendMessage called for 201000111222, driver ready: false, queue length: 4
+📬 Queueing message for 201000111222 (driver not ready)
+📊 Queue now has 5 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m✅ Message 1782176013717dpqvg198sahl sent successfully to 201000111222
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m✅ Batch complete: 2 succeeded, 0 failed
+
+[90mstdout[2m | tests/unit/worker.test.js[2m > [22m[2mcampaignWorker[2m > [22m[2mprocesses multiple messages in a campaign
+[22m[39m✅ Campaign 1782176013716lsherxpe9 completed: 2 sent, 0 failed
+
+ [31m❯[39m tests/unit/worker.test.js [2m([22m[2m5 tests[22m[2m | [22m[31m4 failed[39m[2m)[22m[32m 297[2mms[22m[39m
+[31m     [31m×[31m processes a single message successfully[39m[32m 249[2mms[22m[39m
+[31m     [31m×[31m marks a message as failed when sendMessage fails[39m[32m 16[2mms[22m[39m
+[31m     [31m×[31m marks a message as failed when sendMessage throws[39m[32m 10[2mms[22m[39m
+[31m     [31m×[31m processes multiple messages in a campaign[39m[32m 14[2mms[22m[39m
+     [32m✓[39m does not start a worker interval in test mode[32m 3[2mms[22m[39m
+[90mstdout[2m | tests/integration/worker-integration.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+
+[90mstdout[2m | tests/integration/worker-integration.test.js
+[22m[39m[dotenv@17.2.3] injecting env (0) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m📬 Found 3 pending message(s)
+📦 Campaign 1782176014418r6t2ittpn: Processing 2 messages in 1 batch(es)
+   Batch 1/1 (2 messages)
+🔄 Processing batch of 2 messages...
+📤 Processing message 1782176014421rfczg0yvu0qs for phone 201234567890
+📨 sendMessage called for 201234567890, driver ready: false, queue length: 0
+📬 Queueing message for 201234567890 (driver not ready)
+📊 Queue now has 1 message(s)
+🔄 Starting WhatsApp initialization...
+🚀 Starting Chrome driver creation...
+ℹ️  No bot-owned Chrome PIDs to kill
+🚀 Starting driver creation process...
+🧹 Cleaning profile directory: C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+✅ Profile directory cleaned
+⚠️  Using fresh profile (keepLogin=false): C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+🔧 Building isolated Chrome driver...
+   Profile dir : C:\Users\user\Desktop\whatsapp-bot-node\chrome-profile-automessage
+   Sub-profile : BotProfile
+   Debug port  : 9272
+   🔒 Fully isolated — your personal Chrome will NOT be affected
+🔄 Starting queue processor (checking every 3 seconds)...
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Message 1782176014421rfczg0yvu0qs sent successfully to 201234567890
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m   ⏳ Waiting 0s before next message...
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m📤 Processing message 1782176014421422vicdqy1ul for phone 201000111222
+📨 sendMessage called for 201000111222, driver ready: false, queue length: 1
+📬 Queueing message for 201000111222 (driver not ready)
+📊 Queue now has 2 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Message 1782176014421422vicdqy1ul sent successfully to 201000111222
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Batch complete: 2 succeeded, 0 failed
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Campaign 1782176014418r6t2ittpn completed: 2 sent, 0 failed
+📦 Campaign 1782176014420yszvekznu: Processing 1 messages in 1 batch(es)
+   Batch 1/1 (1 messages)
+🔄 Processing batch of 1 messages...
+📤 Processing message 1782176014421pxd7glydvd2s for phone 201333444555
+📨 sendMessage called for 201333444555, driver ready: false, queue length: 2
+📬 Queueing message for 201333444555 (driver not ready)
+📊 Queue now has 3 message(s)
+⏳ WhatsApp initialization already in progress...
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Message 1782176014421pxd7glydvd2s sent successfully to 201333444555
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Batch complete: 1 succeeded, 0 failed
+
+[90mstdout[2m | tests/integration/worker-integration.test.js[2m > [22m[2mWorker integration[2m > [22m[2mprocesses all pending messages across campaigns
+[22m[39m✅ Campaign 1782176014420yszvekznu completed: 1 sent, 0 failed
+
+ [31m❯[39m tests/integration/worker-integration.test.js [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 309[2mms[22m[39m
+[31m     [31m×[31m processes all pending messages across campaigns[39m[32m 300[2mms[22m[39m
+[90mstdout[2m | tests/api/offers.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 👥 sync secrets across teammates & machines: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+
+[90mstdout[2m | tests/api/offers.test.js[2m > [22m[2mOffers API[2m > [22m[2mPOST /api/offers/:id/build-audience returns success even with no matches
+[22m[39m🚀 Building audience for offer: Build (178217601680225ahpfhos)
+🚀 Building audience for offer: 178217601680225ahpfhos
+📊 Executing SQL query...
+Query: SELECT 
+            c.ClientID as clientId,
+            c.Mobile as phone,
+            c.Name as name,
+            DATEDIFF(year, c.BirthDate, GETDATE()) as age,
+            c.State as maritalStatus,
+            c.CameFrom as cameFrom,
+            c.BirthDate as birthDate,
+            c.RegisterDate as registerDate,
+            COUNT(h.invID) as visitCount,
+            ISNULL(SUM(h.GrandTotal), 0) as totalSpend,
+            MAX(h.invDate) as lastVisitDate
+        FROM TblClient c
+        LEFT JOIN TblinvServHead h
+            ON c.ClientID = h.ClientID
+        WHERE ((c.CameFrom = 'Cairo'))
+        GROUP BY 
+            c.ClientID,
+            c.Mobile,
+            c.Name,
+            c.BirthDate,
+            c.State,
+            c.CameFrom,
+            c.RegisterDate
+        
+        ORDER BY c.ClientID
+
+[90mstderr[2m | tests/api/offers.test.js[2m > [22m[2mOffers API[2m > [22m[2mPOST /api/offers/:id/build-audience returns success even with no matches
+[22m[39m❌ Database connection error: Login failed for user 'testuser'.
+
+[90mstderr[2m | tests/api/offers.test.js[2m > [22m[2mOffers API[2m > [22m[2mPOST /api/offers/:id/build-audience returns success even with no matches
+[22m[39m❌ Query execution error: Login failed for user 'testuser'.
+
+[90mstderr[2m | tests/api/offers.test.js[2m > [22m[2mOffers API[2m > [22m[2mPOST /api/offers/:id/build-audience returns success even with no matches
+[22m[39m❌ Error building audience: ConnectionError: Login failed for user 'testuser'.
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mmssql[24m\lib\tedious\connection-pool.js:85:17
+    at Connection.onConnect [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:849:9[90m)[39m
+[90m    at Object.onceWrapper (node:events:633:26)[39m
+[90m    at Connection.emit (node:events:518:28)[39m
+    at Connection.emit [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:970:18[90m)[39m
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:2369:18
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+  code: [32m'ELOGIN'[39m,
+  originalError: ConnectionError: Login failed for user 'testuser'.
+      at Login7TokenHandler.onErrorMessage [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\handler.js:186:19[90m)[39m
+      at Readable.<anonymous> [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\token-stream-parser.js:19:33[90m)[39m
+  [90m    at Readable.emit (node:events:518:28)[39m
+  [90m    at addChunk (node:internal/streams/readable:561:12)[39m
+  [90m    at readableAddChunkPushObjectMode (node:internal/streams/readable:538:3)[39m
+  [90m    at Readable.push (node:internal/streams/readable:393:5)[39m
+  [90m    at nextAsync (node:internal/streams/from:194:22)[39m
+  [90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+    code: [32m'ELOGIN'[39m
+  }
+}
+
+[90mstderr[2m | tests/api/offers.test.js[2m > [22m[2mOffers API[2m > [22m[2mPOST /api/offers/:id/build-audience returns success even with no matches
+[22m[39mError building audience: ConnectionError: Login failed for user 'testuser'.
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mmssql[24m\lib\tedious\connection-pool.js:85:17
+    at Connection.onConnect [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:849:9[90m)[39m
+[90m    at Object.onceWrapper (node:events:633:26)[39m
+[90m    at Connection.emit (node:events:518:28)[39m
+    at Connection.emit [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:970:18[90m)[39m
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:2369:18
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+  code: [32m'ELOGIN'[39m,
+  originalError: ConnectionError: Login failed for user 'testuser'.
+      at Login7TokenHandler.onErrorMessage [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\handler.js:186:19[90m)[39m
+      at Readable.<anonymous> [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\token-stream-parser.js:19:33[90m)[39m
+  [90m    at Readable.emit (node:events:518:28)[39m
+  [90m    at addChunk (node:internal/streams/readable:561:12)[39m
+  [90m    at readableAddChunkPushObjectMode (node:internal/streams/readable:538:3)[39m
+  [90m    at Readable.push (node:internal/streams/readable:393:5)[39m
+  [90m    at nextAsync (node:internal/streams/from:194:22)[39m
+  [90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+    code: [32m'ELOGIN'[39m
+  }
+}
+
+ [31m❯[39m tests/api/offers.test.js [2m([22m[2m8 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 251[2mms[22m[39m
+     [32m✓[39m POST /api/offers creates an offer[32m 64[2mms[22m[39m
+[31m     [31m×[31m POST /api/offers requires a name[39m[32m 11[2mms[22m[39m
+     [32m✓[39m GET /api/offers/:id returns the offer with targeting rules[32m 28[2mms[22m[39m
+     [32m✓[39m PUT /api/offers/:id updates an offer[32m 21[2mms[22m[39m
+     [32m✓[39m DELETE /api/offers/:id deletes an offer and its rules[32m 18[2mms[22m[39m
+     [32m✓[39m POST /api/offers/:id/targeting creates a rule[32m 20[2mms[22m[39m
+     [32m✓[39m GET /api/offers/:id/audience returns empty audience initially[32m 14[2mms[22m[39m
+[31m     [31m×[31m POST /api/offers/:id/build-audience returns success even with no matches[39m[32m 68[2mms[22m[39m
+[90mstdout[2m | tests/api/campaigns.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mPOST /api/campaigns creates a segment campaign
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [90mundefined[39m,
+  hasOfferId: [33mfalse[39m,
+  name: [32m'Segment Campaign'[39m,
+  segmentType: [32m'today'[39m
+}
+⚠️  Using segment-based campaign flow (no offerId provided)
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mPOST /api/campaigns requires name and segmentType for segment campaigns
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [90mundefined[39m,
+  hasOfferId: [33mfalse[39m,
+  name: [32m'Missing segment'[39m,
+  segmentType: [90mundefined[39m
+}
+⚠️  Using segment-based campaign flow (no offerId provided)
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mGET /api/campaigns returns all campaigns
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [90mundefined[39m,
+  hasOfferId: [33mfalse[39m,
+  name: [32m'Campaign One'[39m,
+  segmentType: [32m'today'[39m
+}
+⚠️  Using segment-based campaign flow (no offerId provided)
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mPUT /api/campaigns/:id updates a campaign
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [90mundefined[39m,
+  hasOfferId: [33mfalse[39m,
+  name: [32m'Old'[39m,
+  segmentType: [32m'today'[39m
+}
+⚠️  Using segment-based campaign flow (no offerId provided)
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mDELETE /api/campaigns/:id deletes a campaign
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [90mundefined[39m,
+  hasOfferId: [33mfalse[39m,
+  name: [32m'Delete'[39m,
+  segmentType: [32m'today'[39m
+}
+⚠️  Using segment-based campaign flow (no offerId provided)
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mPOST /api/campaigns creates an offer-based campaign when offerId is provided
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [32m'1782176018702b3ne8lml9'[39m,
+  hasOfferId: [33mtrue[39m,
+  name: [90mundefined[39m,
+  segmentType: [90mundefined[39m
+}
+✅ Using offer-based campaign flow for offerId: 1782176018702b3ne8lml9
+ℹ️  No messages created - campaign has 0 recipients
+✅ Created campaign 17821760187093yvldkjqb with 0 messages (no recipients)
+
+[90mstderr[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mPOST /api/campaigns creates an offer-based campaign when offerId is provided
+[22m[39m⚠️  Warning: Creating campaign with 0 recipients for offer 1782176018702b3ne8lml9
+   This is allowed in development. Consider building audience first.
+
+[90mstdout[2m | tests/api/campaigns.test.js[2m > [22m[2mCampaigns API[2m > [22m[2mPOST /api/campaigns/:id/execute returns execution data
+[22m[39mPOST /api/campaigns - Request body: {
+  offerId: [90mundefined[39m,
+  hasOfferId: [33mfalse[39m,
+  name: [32m'Exec'[39m,
+  segmentType: [32m'today'[39m
+}
+⚠️  Using segment-based campaign flow (no offerId provided)
+
+ [31m❯[39m tests/api/campaigns.test.js [2m([22m[2m7 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 158[2mms[22m[39m
+     [32m✓[39m POST /api/campaigns creates a segment campaign[32m 54[2mms[22m[39m
+     [32m✓[39m POST /api/campaigns requires name and segmentType for segment campaigns[32m 10[2mms[22m[39m
+     [32m✓[39m GET /api/campaigns returns all campaigns[32m 17[2mms[22m[39m
+     [32m✓[39m PUT /api/campaigns/:id updates a campaign[32m 16[2mms[22m[39m
+     [32m✓[39m DELETE /api/campaigns/:id deletes a campaign[32m 14[2mms[22m[39m
+     [32m✓[39m POST /api/campaigns creates an offer-based campaign when offerId is provided[32m 19[2mms[22m[39m
+[31m     [31m×[31m POST /api/campaigns/:id/execute returns execution data[39m[32m 24[2mms[22m[39m
+[90mstdout[2m | tests/api/customers.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+
+ [32m✓[39m tests/api/customers.test.js [2m([22m[2m7 tests[22m[2m)[22m[32m 183[2mms[22m[39m
+[90mstdout[2m | tests/integration/campaign-lifecycle.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: ⚙️  override existing env vars with { override: true }
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+
+[90mstdout[2m | tests/integration/campaign-lifecycle.test.js[2m > [22m[2mCampaign lifecycle integration[2m > [22m[2mbuilds audience, creates an offer campaign, and starts it
+[22m[39m🚀 Building audience for offer: Lifecycle Offer (1782176022224031t001xr)
+🚀 Building audience for offer: 1782176022224031t001xr
+📊 Executing SQL query...
+Query: SELECT 
+            c.ClientID as clientId,
+            c.Mobile as phone,
+            c.Name as name,
+            DATEDIFF(year, c.BirthDate, GETDATE()) as age,
+            c.State as maritalStatus,
+            c.CameFrom as cameFrom,
+            c.BirthDate as birthDate,
+            c.RegisterDate as registerDate,
+            COUNT(h.invID) as visitCount,
+            ISNULL(SUM(h.GrandTotal), 0) as totalSpend,
+            MAX(h.invDate) as lastVisitDate
+        FROM TblClient c
+        LEFT JOIN TblinvServHead h
+            ON c.ClientID = h.ClientID
+        WHERE ((c.CameFrom = 'Cairo'))
+        GROUP BY 
+            c.ClientID,
+            c.Mobile,
+            c.Name,
+            c.BirthDate,
+            c.State,
+            c.CameFrom,
+            c.RegisterDate
+        HAVING ((COUNT(h.invID) >= 1))
+        ORDER BY c.ClientID
+
+[90mstderr[2m | tests/integration/campaign-lifecycle.test.js[2m > [22m[2mCampaign lifecycle integration[2m > [22m[2mbuilds audience, creates an offer campaign, and starts it
+[22m[39m❌ Database connection error: Login failed for user 'testuser'.
+
+[90mstderr[2m | tests/integration/campaign-lifecycle.test.js[2m > [22m[2mCampaign lifecycle integration[2m > [22m[2mbuilds audience, creates an offer campaign, and starts it
+[22m[39m❌ Query execution error: Login failed for user 'testuser'.
+
+[90mstderr[2m | tests/integration/campaign-lifecycle.test.js[2m > [22m[2mCampaign lifecycle integration[2m > [22m[2mbuilds audience, creates an offer campaign, and starts it
+[22m[39m❌ Error building audience: ConnectionError: Login failed for user 'testuser'.
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mmssql[24m\lib\tedious\connection-pool.js:85:17
+    at Connection.onConnect [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:849:9[90m)[39m
+[90m    at Object.onceWrapper (node:events:633:26)[39m
+[90m    at Connection.emit (node:events:518:28)[39m
+    at Connection.emit [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:970:18[90m)[39m
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:2369:18
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+  code: [32m'ELOGIN'[39m,
+  originalError: ConnectionError: Login failed for user 'testuser'.
+      at Login7TokenHandler.onErrorMessage [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\handler.js:186:19[90m)[39m
+      at Readable.<anonymous> [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\token-stream-parser.js:19:33[90m)[39m
+  [90m    at Readable.emit (node:events:518:28)[39m
+  [90m    at addChunk (node:internal/streams/readable:561:12)[39m
+  [90m    at readableAddChunkPushObjectMode (node:internal/streams/readable:538:3)[39m
+  [90m    at Readable.push (node:internal/streams/readable:393:5)[39m
+  [90m    at nextAsync (node:internal/streams/from:194:22)[39m
+  [90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+    code: [32m'ELOGIN'[39m
+  }
+}
+
+[90mstderr[2m | tests/integration/campaign-lifecycle.test.js[2m > [22m[2mCampaign lifecycle integration[2m > [22m[2mbuilds audience, creates an offer campaign, and starts it
+[22m[39mError building audience: ConnectionError: Login failed for user 'testuser'.
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mmssql[24m\lib\tedious\connection-pool.js:85:17
+    at Connection.onConnect [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:849:9[90m)[39m
+[90m    at Object.onceWrapper (node:events:633:26)[39m
+[90m    at Connection.emit (node:events:518:28)[39m
+    at Connection.emit [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:970:18[90m)[39m
+    at [90mC:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\connection.js:2369:18
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+  code: [32m'ELOGIN'[39m,
+  originalError: ConnectionError: Login failed for user 'testuser'.
+      at Login7TokenHandler.onErrorMessage [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\handler.js:186:19[90m)[39m
+      at Readable.<anonymous> [90m(C:\Users\user\Desktop\whatsapp-bot-node\[39mnode_modules\[4mtedious[24m\lib\token\token-stream-parser.js:19:33[90m)[39m
+  [90m    at Readable.emit (node:events:518:28)[39m
+  [90m    at addChunk (node:internal/streams/readable:561:12)[39m
+  [90m    at readableAddChunkPushObjectMode (node:internal/streams/readable:538:3)[39m
+  [90m    at Readable.push (node:internal/streams/readable:393:5)[39m
+  [90m    at nextAsync (node:internal/streams/from:194:22)[39m
+  [90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m {
+    code: [32m'ELOGIN'[39m
+  }
+}
+
+ [31m❯[39m tests/integration/campaign-lifecycle.test.js [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 119[2mms[22m[39m
+[31m     [31m×[31m builds audience, creates an offer campaign, and starts it[39m[32m 113[2mms[22m[39m
+[90mstdout[2m | tests/unit/templates.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+
+ [32m✓[39m tests/unit/templates.test.js [2m([22m[2m4 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [31m❯[39m tests/unit/audience.test.js [2m([22m[2m9 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 66[2mms[22m[39m
+     [32m✓[39m selects customers who visited today[32m 11[2mms[22m[39m
+[31m     [31m×[31m selects customers who visited this week[39m[32m 15[2mms[22m[39m
+     [32m✓[39m returns phone numbers only for a segment[32m 5[2mms[22m[39m
+     [32m✓[39m returns empty arrays for unknown segments[32m 3[2mms[22m[39m
+[31m     [31m×[31m builds an audience query without a where clause when no rules have city/marital/cameFrom[39m[32m 14[2mms[22m[39m
+[31m     [31m×[31m includes city filter in the where clause[39m[32m 8[2mms[22m[39m
+     [32m✓[39m combines where and having conditions[32m 2[2mms[22m[39m
+     [32m✓[39m includes age range in the having clause[32m 2[2mms[22m[39m
+     [32m✓[39m escapes single quotes in string filters to prevent SQL injection[32m 1[2mms[22m[39m
+[90mstdout[2m | tests/unit/phone.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+
+ [32m✓[39m tests/unit/phone.test.js [2m([22m[2m4 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+[90mstdout[2m | tests/api/templates.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+
+[90mstdout[2m | tests/api/templates.test.js[2m > [22m[2mTemplates API[2m > [22m[2mPUT /api/templates/:type saves a template
+[22m[39m📝 Template 'sale' updated
+
+[90mstdout[2m | tests/api/templates.test.js[2m > [22m[2mTemplates API[2m > [22m[2mGET /api/templates/:type returns the saved template
+[22m[39m📝 Template 'sale' updated
+
+ [32m✓[39m tests/api/templates.test.js [2m([22m[2m4 tests[22m[2m)[22m[32m 90[2mms[22m[39m
+ [32m✓[39m tests/unit/campaigns.test.js [2m([22m[2m13 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+[90mstdout[2m | tests/integration/data-persistence.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+
+[90mstdout[2m | tests/integration/data-persistence.test.js[2m > [22m[2mData persistence integration[2m > [22m[2mpersists templates updated via the API
+[22m[39m📝 Template 'sale' updated
+
+ [32m✓[39m tests/integration/data-persistence.test.js [2m([22m[2m4 tests[22m[2m)[22m[32m 92[2mms[22m[39m
+[90mstdout[2m | tests/api/health.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+
+ [32m✓[39m tests/api/health.test.js [2m([22m[2m1 test[22m[2m)[22m[32m 43[2mms[22m[39m
+[90mstdout[2m | tests/whatsapp/real-send.test.js
+[22m[39m[dotenv@17.2.3] injecting env (6) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+
+ [2m[90m↓[39m[22m tests/whatsapp/real-send.test.js [2m([22m[2m1 test[22m[2m | [22m[33m1 skipped[39m[2m)[22m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/integration/campaign-lifecycle.test.js[2m [ tests/integration/campaign-lifecycle.test.js ][22m
+[31m[1mError[22m: EBUSY: resource busy or locked, unlink 'C:\Users\user\Desktop\whatsapp-bot-node\tests\data\offers.json'[39m
+[36m [2m❯[22m cleanTestData tests/setup.js:[2m8:8[22m[39m
+    [90m  6|[39m [35mfunction[39m [34mcleanTestData[39m() {
+    [90m  7|[39m   [35mif[39m (fs[33m.[39m[34mexistsSync[39m([33mTEST_DATA_DIR[39m)) {
+    [90m  8|[39m     fs[33m.[39m[34mrmSync[39m([33mTEST_DATA_DIR[39m[33m,[39m { recursive[33m:[39m [35mtrue[39m[33m,[39m force[33m:[39m [35mtrue[39m })[33m;[39m
+    [90m   |[39m        [31m^[39m
+    [90m  9|[39m   }
+    [90m 10|[39m   fs[33m.[39m[34mmkdirSync[39m([33mTEST_DATA_DIR[39m[33m,[39m { recursive[33m:[39m [35mtrue[39m })[33m;[39m
+[90m [2m❯[22m tests/setup.js:[2m22:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 15 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/api/campaigns.test.js[2m > [22mCampaigns API[2m > [22mPOST /api/campaigns/:id/execute returns execution data
+[31m[1mAssertionError[22m: expected 400 to be 200 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 400[39m
+
+[36m [2m❯[22m tests/api/campaigns.test.js:[2m82:24[22m[39m
+    [90m 80|[39m
+    [90m 81|[39m     const res = await request(app).post(`/api/campaigns/${create.body.…
+    [90m 82|[39m     [34mexpect[39m(res[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m   |[39m                        [31m^[39m
+    [90m 83|[39m     [34mexpect[39m(res[33m.[39mbody[33m.[39mtotalMessages)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+    [90m 84|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/api/offers.test.js[2m > [22mOffers API[2m > [22mPOST /api/offers requires a name
+[31m[1mError[22m: EBUSY: resource busy or locked, unlink 'C:\Users\user\Desktop\whatsapp-bot-node\tests\data\offers.json'[39m
+[36m [2m❯[22m resetTestData tests/utils/test-helpers.js:[2m10:8[22m[39m
+    [90m  8|[39m [35mexport[39m [35mfunction[39m [34mresetTestData[39m() {
+    [90m  9|[39m   [35mif[39m (fs[33m.[39m[34mexistsSync[39m([33mTEST_DATA_DIR[39m)) {
+    [90m 10|[39m     fs[33m.[39m[34mrmSync[39m([33mTEST_DATA_DIR[39m[33m,[39m { recursive[33m:[39m [35mtrue[39m[33m,[39m force[33m:[39m [35mtrue[39m })[33m;[39m
+    [90m   |[39m        [31m^[39m
+    [90m 11|[39m   }
+    [90m 12|[39m   fs[33m.[39m[34mmkdirSync[39m([33mTEST_DATA_DIR[39m[33m,[39m { recursive[33m:[39m [35mtrue[39m })[33m;[39m
+[90m [2m❯[22m tests/api/offers.test.js:[2m9:18[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/api/offers.test.js[2m > [22mOffers API[2m > [22mPOST /api/offers/:id/build-audience returns success even with no matches
+[31m[1mAssertionError[22m: expected 500 to be 200 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 500[39m
+
+[36m [2m❯[22m tests/api/offers.test.js:[2m73:24[22m[39m
+    [90m 71|[39m
+    [90m 72|[39m     const res = await request(app).post(`/api/offers/${offer.body.id}/…
+    [90m 73|[39m     [34mexpect[39m(res[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m   |[39m                        [31m^[39m
+    [90m 74|[39m     [34mexpect[39m(res[33m.[39mbody[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 75|[39m     [34mexpect[39m(res[33m.[39mbody[33m.[39maudienceCount)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/api/sales.test.js[2m > [22mSales API[2m > [22mPOST /api/sales/notify queues a WhatsApp message
+[31m[1mAssertionError[22m: expected "sendMessage" to be called with arguments: [ '201234567890', 'Hello from test' ][90m
+
+Number of calls: [1m0[22m
+[31m[39m
+[36m [2m❯[22m tests/api/sales.test.js:[2m36:25[22m[39m
+    [90m 34|[39m     [34mexpect[39m(res[33m.[39mbody[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 35|[39m     [34mexpect[39m(res[33m.[39mbody[33m.[39mqueued)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 36|[39m     expect(sendMessage).toHaveBeenCalledWith('201234567890', 'Hello fr…
+    [90m   |[39m                         [31m^[39m
+    [90m 37|[39m   })[33m;[39m
+    [90m 38|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/api/sales.test.js[2m > [22mSales API[2m > [22mPOST /api/sales/send-message queues a WhatsApp message
+[31m[1mAssertionError[22m: expected "sendMessage" to be called with arguments: [ '201234567890', 'Direct message' ][90m
+
+Number of calls: [1m0[22m
+[31m[39m
+[36m [2m❯[22m tests/api/sales.test.js:[2m49:25[22m[39m
+    [90m 47|[39m     [34mexpect[39m(res[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m 48|[39m     [34mexpect[39m(res[33m.[39mbody[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 49|[39m     expect(sendMessage).toHaveBeenCalledWith('201234567890', 'Direct m…
+    [90m   |[39m                         [31m^[39m
+    [90m 50|[39m   })[33m;[39m
+    [90m 51|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/api/sales.test.js[2m > [22mSales API[2m > [22mPOST /api/sales/notify for first_time customers also sends SMS
+[31m[1mAssertionError[22m: expected "sendMessage" to be called at least once[39m
+[36m [2m❯[22m tests/api/sales.test.js:[2m82:25[22m[39m
+    [90m 80|[39m
+    [90m 81|[39m     [34mexpect[39m(res[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m 82|[39m     [34mexpect[39m(sendMessage)[33m.[39m[34mtoHaveBeenCalled[39m()[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m 83|[39m     [34mexpect[39m(sendSMS)[33m.[39m[34mtoHaveBeenCalled[39m()[33m;[39m
+    [90m 84|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/integration/campaign-lifecycle.test.js[2m > [22mCampaign lifecycle integration[2m > [22mbuilds audience, creates an offer campaign, and starts it
+[31m[1mAssertionError[22m: expected 500 to be 200 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 500[39m
+
+[36m [2m❯[22m tests/integration/campaign-lifecycle.test.js:[2m35:26[22m[39m
+    [90m 33|[39m
+    [90m 34|[39m     const build = await request(app).post(`/api/offers/${offer.body.id…
+    [90m 35|[39m     [34mexpect[39m(build[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m   |[39m                          [31m^[39m
+    [90m 36|[39m     [34mexpect[39m(build[33m.[39mbody[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 37|[39m     [34mexpect[39m(build[33m.[39mbody[33m.[39maudienceCount)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/integration/worker-integration.test.js[2m > [22mWorker integration[2m > [22mprocesses all pending messages across campaigns
+[31m[1mAssertionError[22m: expected "sendMessage" to be called 3 times, but got 0 times[39m
+[36m [2m❯[22m tests/integration/worker-integration.test.js:[2m35:25[22m[39m
+    [90m 33|[39m     [34mexpect[39m(statsB[33m.[39mpending)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+    [90m 34|[39m     [34mexpect[39m(statsB[33m.[39msent)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+    [90m 35|[39m     [34mexpect[39m(sendMessage)[33m.[39m[34mtoHaveBeenCalledTimes[39m([34m3[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m 36|[39m
+    [90m 37|[39m     [35mconst[39m updatedA [33m=[39m offerCampaignModel[33m.[39m[34mgetCampaignById[39m(campaignA[33m.[39mid)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/audience.test.js[2m > [22msegmentation[2m > [22mselects customers who visited this week
+[31m[1mAssertionError[22m: expected [ 'Today' ] to include 'LastWeek'[39m
+[36m [2m❯[22m tests/unit/audience.test.js:[2m34:19[22m[39m
+    [90m 32|[39m     [35mconst[39m names [33m=[39m customers[33m.[39m[34mmap[39m(c [33m=>[39m c[33m.[39mname)[33m;[39m
+    [90m 33|[39m     [34mexpect[39m(names)[33m.[39m[34mtoContain[39m([32m'Today'[39m)[33m;[39m
+    [90m 34|[39m     [34mexpect[39m(names)[33m.[39m[34mtoContain[39m([32m'LastWeek'[39m)[33m;[39m
+    [90m   |[39m                   [31m^[39m
+    [90m 35|[39m     [34mexpect[39m(names)[33m.[39mnot[33m.[39m[34mtoContain[39m([32m'LastMonth'[39m)[33m;[39m
+    [90m 36|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/audience.test.js[2m > [22mofferAudienceBuilder[2m > [22mbuilds an audience query without a where clause when no rules have city/marital/cameFrom
+[31m[1mAssertionError[22m: expected 'SELECT \n            c.ClientID as cl…' to contain 'HAVING (COUNT(h.invID) >= 2 AND ISNUL…'[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- HAVING (COUNT(h.invID) >= 2 AND ISNULL(SUM(h.GrandTotal), 0) >= 100)[39m
+[31m+ SELECT [39m
+[31m+             c.ClientID as clientId,[39m
+[31m+             c.Mobile as phone,[39m
+[31m+             c.Name as name,[39m
+[31m+             DATEDIFF(year, c.BirthDate, GETDATE()) as age,[39m
+[31m+             c.State as maritalStatus,[39m
+[31m+             c.CameFrom as cameFrom,[39m
+[31m+             c.BirthDate as birthDate,[39m
+[31m+             c.RegisterDate as registerDate,[39m
+[31m+             COUNT(h.invID) as visitCount,[39m
+[31m+             ISNULL(SUM(h.GrandTotal), 0) as totalSpend,[39m
+[31m+             MAX(h.invDate) as lastVisitDate[39m
+[31m+         FROM TblClient c[39m
+[31m+         LEFT JOIN TblinvServHead h[39m
+[31m+             ON c.ClientID = h.ClientID[39m
+[31m+         [39m
+[31m+         GROUP BY [39m
+[31m+             c.ClientID,[39m
+[31m+             c.Mobile,[39m
+[31m+             c.Name,[39m
+[31m+             c.BirthDate,[39m
+[31m+             c.State,[39m
+[31m+             c.CameFrom,[39m
+[31m+             c.RegisterDate[39m
+[31m+ [7m        [27mHAVING [7m([27m(COUNT(h.invID) >= 2 AND ISNULL(SUM(h.GrandTotal), 0) >= 100)[7m)[27m[39m
+[31m+         ORDER BY c.ClientID[39m
+
+[36m [2m❯[22m tests/unit/audience.test.js:[2m59:19[22m[39m
+    [90m 57|[39m
+    [90m 58|[39m     [34mexpect[39m(query)[33m.[39m[34mtoContain[39m([32m'FROM TblClient'[39m)[33m;[39m
+    [90m 59|[39m     expect(query).toContain('HAVING (COUNT(h.invID) >= 2 AND ISNULL(SU…
+    [90m   |[39m                   [31m^[39m
+    [90m 60|[39m   })[33m;[39m
+    [90m 61|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/audience.test.js[2m > [22mofferAudienceBuilder[2m > [22mincludes city filter in the where clause
+[31m[1mAssertionError[22m: expected 'SELECT \n            c.ClientID as cl…' to contain 'WHERE (c.CameFrom = \'Cairo\')'[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- WHERE (c.CameFrom = 'Cairo')[39m
+[31m+ SELECT [39m
+[31m+             c.ClientID as clientId,[39m
+[31m+             c.Mobile as phone,[39m
+[31m+             c.Name as name,[39m
+[31m+             DATEDIFF(year, c.BirthDate, GETDATE()) as age,[39m
+[31m+             c.State as maritalStatus,[39m
+[31m+             c.CameFrom as cameFrom,[39m
+[31m+             c.BirthDate as birthDate,[39m
+[31m+             c.RegisterDate as registerDate,[39m
+[31m+             COUNT(h.invID) as visitCount,[39m
+[31m+             ISNULL(SUM(h.GrandTotal), 0) as totalSpend,[39m
+[31m+             MAX(h.invDate) as lastVisitDate[39m
+[31m+         FROM TblClient c[39m
+[31m+         LEFT JOIN TblinvServHead h[39m
+[31m+             ON c.ClientID = h.ClientID[39m
+[31m+ [7m        [27mWHERE [7m([27m(c.CameFrom = 'Cairo')[7m)[27m[39m
+[31m+         GROUP BY [39m
+[31m+             c.ClientID,[39m
+[31m+             c.Mobile,[39m
+[31m+             c.Name,[39m
+[31m+             c.BirthDate,[39m
+[31m+             c.State,[39m
+[31m+             c.CameFrom,[39m
+[31m+             c.RegisterDate[39m
+[31m+         [39m
+[31m+         ORDER BY c.ClientID[39m
+
+[36m [2m❯[22m tests/unit/audience.test.js:[2m67:19[22m[39m
+    [90m 65|[39m     ][33m,[39m {})[33m;[39m
+    [90m 66|[39m
+    [90m 67|[39m     [34mexpect[39m(query)[33m.[39m[34mtoContain[39m([32m"WHERE (c.CameFrom = 'Cairo')"[39m)[33m;[39m
+    [90m   |[39m                   [31m^[39m
+    [90m 68|[39m   })[33m;[39m
+    [90m 69|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/worker.test.js[2m > [22mcampaignWorker[2m > [22mprocesses a single message successfully
+[31m[1mAssertionError[22m: expected "sendMessage" to be called with arguments: [ '201234567890', 'Hello' ][90m
+
+Number of calls: [1m0[22m
+[31m[39m
+[36m [2m❯[22m tests/unit/worker.test.js:[2m28:25[22m[39m
+    [90m 26|[39m
+    [90m 27|[39m     [34mexpect[39m(result[33m.[39msucceeded)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+    [90m 28|[39m     [34mexpect[39m(sendMessage)[33m.[39m[34mtoHaveBeenCalledWith[39m([32m'201234567890'[39m[33m,[39m [32m'Hello'[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m 29|[39m
+    [90m 30|[39m     const updatedCampaign = offerCampaignModel.getCampaignById(campaig…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/worker.test.js[2m > [22mcampaignWorker[2m > [22mmarks a message as failed when sendMessage fails
+[31m[1mAssertionError[22m: expected +0 to be 1 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m tests/unit/worker.test.js:[2m47:27[22m[39m
+    [90m 45|[39m     const result = await campaignWorker.processCampaignMessages(campai…
+    [90m 46|[39m
+    [90m 47|[39m     [34mexpect[39m(result[33m.[39mfailed)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+    [90m   |[39m                           [31m^[39m
+    [90m 48|[39m
+    [90m 49|[39m     const updatedMessage = campaignMessageModel.getMessageStats(campai…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/worker.test.js[2m > [22mcampaignWorker[2m > [22mmarks a message as failed when sendMessage throws
+[31m[1mAssertionError[22m: expected +0 to be 1 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m tests/unit/worker.test.js:[2m69:27[22m[39m
+    [90m 67|[39m     const result = await campaignWorker.processCampaignMessages(campai…
+    [90m 68|[39m
+    [90m 69|[39m     [34mexpect[39m(result[33m.[39mfailed)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+    [90m   |[39m                           [31m^[39m
+    [90m 70|[39m   })[33m;[39m
+    [90m 71|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/unit/worker.test.js[2m > [22mcampaignWorker[2m > [22mprocesses multiple messages in a campaign
+[31m[1mAssertionError[22m: expected "sendMessage" to be called 2 times, but got 0 times[39m
+[36m [2m❯[22m tests/unit/worker.test.js:[2m86:25[22m[39m
+    [90m 84|[39m     [34mexpect[39m(result[33m.[39msucceeded)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m 85|[39m     [34mexpect[39m(result[33m.[39mfailed)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+    [90m 86|[39m     [34mexpect[39m(sendMessage)[33m.[39m[34mtoHaveBeenCalledTimes[39m([34m2[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m 87|[39m   })[33m;[39m
+    [90m 88|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/16]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m7 failed[39m[22m[2m | [22m[1m[32m7 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (15)[39m
+[2m      Tests [22m [1m[31m15 failed[39m[22m[2m | [22m[1m[32m60 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (76)[39m
+[2m   Start at [22m 03:53:30
+[2m   Duration [22m 21.10s[2m (transform 322ms, setup 430ms, import 12.81s, tests 2.68s, environment 4ms)[22m
+

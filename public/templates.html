@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>محرر الرسائل - WhatsApp Bot</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* RTL & Arabic support */
+        body { direction: rtl; text-align: right; }
+        .container { direction: rtl; }
+
+        /* Template Editor Layout */
+        .editor-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            padding: 30px;
+        }
+
+        /* Template Type Selector */
+        .template-tabs {
+            display: flex;
+            gap: 12px;
+            padding: 20px 30px 0;
+        }
+        .template-tab {
+            padding: 12px 28px;
+            border: 2px solid #e0e0e0;
+            background: #f9f9f9;
+            border-radius: 10px 10px 0 0;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s;
+            font-family: inherit;
+            border-bottom: none;
+        }
+        .template-tab:hover { background: #eef; color: #667eea; }
+        .template-tab.active {
+            background: white;
+            color: #667eea;
+            border-color: #667eea;
+            border-bottom: 2px solid white;
+            margin-bottom: -2px;
+            z-index: 1;
+        }
+
+        /* Editor Panel */
+        .editor-panel {
+            background: #f9f9f9;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #e0e0e0;
+        }
+        .editor-panel h3 {
+            color: #333;
+            margin-bottom: 16px;
+            font-size: 1.2em;
+        }
+
+        /* Variables Section */
+        .variables-section {
+            margin-bottom: 20px;
+        }
+        .variables-section h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 0.95em;
+        }
+        .variable-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .variable-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-family: inherit;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        .variable-chip:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.4);
+        }
+        .variable-chip .chip-icon { font-size: 1em; }
+        .variable-chip.booking-only {
+            background: #27ae60;
+        }
+        .variable-chip.booking-only:hover {
+            background: #229954;
+            box-shadow: 0 3px 8px rgba(39, 174, 96, 0.4);
+        }
+
+        /* Textarea */
+        .template-textarea {
+            width: 100%;
+            min-height: 300px;
+            padding: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            line-height: 1.7;
+            resize: vertical;
+            direction: rtl;
+            text-align: right;
+            transition: border-color 0.3s;
+        }
+        .template-textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        }
+
+        /* Preview Panel */
+        .preview-panel {
+            background: #f9f9f9;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #e0e0e0;
+        }
+        .preview-panel h3 {
+            color: #333;
+            margin-bottom: 16px;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* WhatsApp-style preview bubble */
+        .whatsapp-preview {
+            background: #e7ffdb;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 0.95em;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            direction: rtl;
+            text-align: right;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+        }
+        .whatsapp-preview .highlight-var {
+            background: #fff3cd;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 600;
+            color: #856404;
+        }
+
+        /* Sample Data */
+        .sample-data-section {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .sample-data-section h4 {
+            color: #888;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+        }
+        .sample-data-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .sample-input {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .sample-input label {
+            font-size: 0.78em;
+            color: #888;
+            font-weight: 500;
+        }
+        .sample-input input {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.85em;
+            font-family: inherit;
+            direction: rtl;
+        }
+        .sample-input input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* Action buttons */
+        .editor-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .editor-actions .btn {
+            flex: 1;
+            padding: 12px 20px;
+            font-size: 1em;
+            font-family: inherit;
+            font-weight: 600;
+        }
+        .btn-save {
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-save:hover {
+            background: #229954;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
+        }
+        .btn-reset {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-reset:hover { background: #c0392b; }
+        .btn-test {
+            background: #f39c12;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-test:hover { background: #e67e22; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            padding: 14px 28px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            font-size: 1em;
+            z-index: 9999;
+            transition: transform 0.3s ease;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #e74c3c; }
+
+        /* Status bar */
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 30px;
+            background: #f5f5f5;
+            border-top: 1px solid #e0e0e0;
+            font-size: 0.85em;
+            color: #888;
+        }
+
+        /* Back link */
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: white;
+            text-decoration: none;
+            font-size: 0.95em;
+            opacity: 0.9;
+        }
+        .back-link:hover { opacity: 1; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .editor-layout {
+                grid-template-columns: 1fr;
+            }
+            .sample-data-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="/" class="back-link">→ الرجوع للرئيسية</a>
+            <h1>✏️ محرر رسائل الواتساب</h1>
+            <p class="subtitle">عدّل رسائل البيع والحجز وأضف متغيرات مخصصة لكل عميل</p>
+        </header>
+
+        <!-- Template Type Tabs -->
+        <div class="template-tabs">
+            <button class="template-tab active" data-type="sale" onclick="switchTemplate('sale')">
+                🛒 رسالة البيع
+            </button>
+            <button class="template-tab" data-type="booking" onclick="switchTemplate('booking')">
+                📅 رسالة الحجز
+            </button>
+            <button class="template-tab" data-type="first_time" onclick="switchTemplate('first_time')">
+                🎉 عميل أول مرة
+            </button>
+            <button class="template-tab" data-type="employee_sale" onclick="switchTemplate('employee_sale')">
+                👷 بيع للموظف
+            </button>
+            <button class="template-tab" data-type="employee_advance" onclick="switchTemplate('employee_advance')">
+                💰 سلفة للموظف
+            </button>
+            <button class="template-tab" data-type="employee_daily_report" onclick="switchTemplate('employee_daily_report')">
+                🌙 تقرير يوم الموظف
+            </button>
+        </div>
+
+        <!-- Editor Layout -->
+        <div class="editor-layout">
+            <!-- Left: Editor -->
+            <div class="editor-panel">
+                <h3>📝 محتوى الرسالة</h3>
+
+                <!-- Variable Chips -->
+                <div class="variables-section">
+                    <h4>أضف متغير (اضغط عليه ليتضاف في الرسالة):</h4>
+                    <div class="variable-chips">
+                        <button class="variable-chip" onclick="insertVariable('{{customerName}}')" title="اسم العميل">
+                            <span class="chip-icon">👤</span> اسم العميل
+                        </button>
+                        <button class="variable-chip" onclick="insertVariable('{{orderId}}')" title="رقم الفاتورة">
+                            <span class="chip-icon">🧾</span> رقم الفاتورة
+                        </button>
+                        <button class="variable-chip" onclick="insertVariable('{{amount}}')" title="المبلغ">
+                            <span class="chip-icon">💰</span> المبلغ
+                        </button>
+                        <button class="variable-chip" onclick="insertVariable('{{notes}}')" title="ملاحظات">
+                            <span class="chip-icon">📝</span> ملاحظات
+                        </button>
+                        <button class="variable-chip" onclick="insertVariable('{{currency}}')" title="العملة">
+                            <span class="chip-icon">💵</span> العملة
+                        </button>
+                        <button class="variable-chip" onclick="insertVariable('{{phone}}')" title="رقم الموبايل">
+                            <span class="chip-icon">📱</span> رقم الموبايل
+                        </button>
+                        <button class="variable-chip booking-only" onclick="insertVariable('{{date}}')" title="تاريخ الحجز">
+                            <span class="chip-icon">📅</span> تاريخ الحجز
+                        </button>
+                        <button class="variable-chip booking-only" onclick="insertVariable('{{time}}')" title="ساعة الحجز">
+                            <span class="chip-icon">🕐</span> ساعة الحجز
+                        </button>
+                        <button class="variable-chip booking-only" onclick="insertVariable('{{service}}')" title="اسم الخدمة">
+                            <span class="chip-icon">💇</span> اسم الخدمة
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Template Text -->
+                <textarea id="template-editor" class="template-textarea" placeholder="اكتب رسالتك هنا..." oninput="updatePreview()"></textarea>
+
+                <!-- Action Buttons -->
+                <div class="editor-actions">
+                    <button class="btn btn-save" onclick="saveTemplate()">💾 حفظ</button>
+                    <button class="btn btn-reset" onclick="resetTemplate()">↩️ إلغاء التعديلات</button>
+                    <button id="btn-test" class="btn btn-test" onclick="sendTestMessage()">📤 إرسال تجربة</button>
+                </div>
+            </div>
+
+            <!-- Right: Preview -->
+            <div class="preview-panel">
+                <h3>👁️ معاينة الرسالة</h3>
+                <div id="whatsapp-preview" class="whatsapp-preview">
+                    <!-- Preview will be rendered here -->
+                </div>
+
+                <!-- Sample Data for Preview -->
+                <div class="sample-data-section">
+                    <h4>بيانات المعاينة (غيّرها عشان تشوف الرسالة هتبان إزاي):</h4>
+                    <div class="sample-data-grid">
+                        <div class="sample-input">
+                            <label>👤 اسم العميل</label>
+                            <input type="text" id="sample-customerName" value="أحمد محمد" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>📱 رقم الموبايل للمعاينة</label>
+                            <input type="text" id="sample-phone" value="201234567890" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>🧾 رقم الفاتورة / الحجز</label>
+                            <input type="text" id="sample-orderId" value="12345" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>💰 المبلغ</label>
+                            <input type="text" id="sample-amount" value="150.00" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>💵 العملة</label>
+                            <input type="text" id="sample-currency" value="EGP" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>� طريقة الدفع</label>
+                            <input type="text" id="sample-paymentMethod" value="كاش" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>📅 تاريخ الحجز</label>
+                            <input type="text" id="sample-date" value="2026-03-20" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>🕐 ساعة الحجز</label>
+                            <input type="text" id="sample-time" value="03:00 PM" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>💇 اسم الخدمة</label>
+                            <input type="text" id="sample-service" value="قص شعر" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>💈 الحلاق / مقدم الخدمة</label>
+                            <input type="text" id="sample-barberName" value="Ali" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>🏢 الفرع</label>
+                            <input type="text" id="sample-branchName" value="Cut Salon" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>📝 ملاحظات</label>
+                            <input type="text" id="sample-notes" value="سلفة شهرية" oninput="updatePreview()">
+                        </div>
+                        <div class="sample-input">
+                            <label>🔗 رابط الحجز</label>
+                            <input type="text" id="sample-bookingLink" value="https://cut-salon.com/bookings" oninput="updatePreview()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test Send Section -->
+                <div class="sample-data-section">
+                    <h4>📤 إرسال رسالة تجريبية:</h4>
+                    <div class="sample-input" style="margin-bottom:8px;">
+                        <label>رقم الموبايل للتجربة</label>
+                        <input type="text" id="test-phone" value="" placeholder="مثلاً: 201227072811" style="padding:10px; font-size:1em;">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <span id="save-status">—</span>
+            <span id="char-count">0 حرف</span>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // State
+        let currentType = 'sale';
+        let templates = {};          // current drafts
+        let savedTemplates = {};     // last saved versions from server
+        const VALID_TYPES = ['sale', 'booking', 'first_time', 'employee_sale', 'employee_advance', 'employee_daily_report'];
+
+        // ========== API ==========
+        async function loadTemplates() {
+            try {
+                const res = await fetch('/api/templates');
+                const data = await res.json();
+                if (data.success) {
+                    templates = {};
+                    savedTemplates = {};
+                    for (const [key, val] of Object.entries(data.templates)) {
+                        if (VALID_TYPES.includes(key)) {
+                            templates[key] = val.template;
+                            savedTemplates[key] = val.template;
+                        }
+                    }
+                    renderEditor();
+                }
+            } catch (err) {
+                showToast('خطأ في تحميل الرسائل', 'error');
+            }
+        }
+
+        async function saveTemplate() {
+            const type = currentType;
+            const template = document.getElementById('template-editor').value;
+            if (!template.trim()) {
+                showToast('الرسالة فاضية!', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/templates/${type}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ template })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    templates[type] = data.template;
+                    savedTemplates[type] = data.template;
+                    document.getElementById('save-status').textContent = 'آخر حفظ: ' + new Date().toLocaleTimeString('ar-EG');
+                    showToast('تم الحفظ ✅', 'success');
+                    updatePreview();
+                } else {
+                    showToast('خطأ: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showToast('خطأ في الحفظ', 'error');
+            }
+        }
+
+        async function sendTestMessage() {
+            const phone = document.getElementById('test-phone').value.trim();
+            if (!phone) {
+                showToast('اكتب رقم الموبايل الأول', 'error');
+                return;
+            }
+
+            const currentTemplate = document.getElementById('template-editor').value;
+            const savedTemplate = savedTemplates[currentType];
+            if (currentTemplate !== savedTemplate) {
+                showToast('احفظ التعديلات أولاً قبل الإرسال التجريبي.', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btn-test');
+            btn.disabled = true;
+
+            const sampleData = getSampleData();
+            const body = {
+                phone: phone,
+                type: currentType,
+                customerName: sampleData.customerName,
+                orderId: sampleData.orderId,
+                invoiceNumber: sampleData.orderId,
+                amount: sampleData.amount,
+                total: sampleData.amount,
+                currency: sampleData.currency,
+                date: sampleData.date,
+                bookingDate: sampleData.date,
+                time: sampleData.time,
+                bookingTime: sampleData.time,
+                service: sampleData.service,
+                services: sampleData.service ? [sampleData.service] : undefined,
+                paymentMethod: sampleData.paymentMethod,
+                barberName: sampleData.barberName,
+                employeeName: sampleData.barberName,
+                branchName: sampleData.branchName,
+                bookingLink: sampleData.bookingLink,
+                notes: sampleData.notes
+            };
+
+            try {
+                const res = await fetch('/api/whatsapp/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('الرسالة التجريبية اتبعتت 📤', 'success');
+                    // Show the actual rendered message in the preview panel
+                    const preview = document.getElementById('whatsapp-preview');
+                    preview.innerHTML = escapeHtml(data.message).replace(/\n/g, '<br>');
+                } else {
+                    showToast('خطأ: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showToast('خطأ في الإرسال', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ========== UI ==========
+        async function switchTemplate(type) {
+            currentType = type;
+            document.querySelectorAll('.template-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.type === type);
+            });
+
+            // Load this type from server if not already loaded
+            if (!savedTemplates[type]) {
+                try {
+                    const res = await fetch(`/api/templates/${type}`);
+                    const data = await res.json();
+                    if (data.success) {
+                        savedTemplates[type] = data.template;
+                        templates[type] = data.template;
+                    }
+                } catch (err) {
+                    showToast('خطأ في تحميل القالب', 'error');
+                }
+            }
+
+            renderEditor();
+        }
+
+        function renderEditor() {
+            const editor = document.getElementById('template-editor');
+            editor.value = templates[currentType] || '';
+            updatePreview();
+            updateCharCount();
+        }
+
+        function insertVariable(variable) {
+            const editor = document.getElementById('template-editor');
+            const start = editor.selectionStart;
+            const end = editor.selectionEnd;
+            const text = editor.value;
+            editor.value = text.substring(0, start) + variable + text.substring(end);
+            editor.selectionStart = editor.selectionEnd = start + variable.length;
+            editor.focus();
+            templates[currentType] = editor.value;
+            updatePreview();
+            updateCharCount();
+        }
+
+        function resetTemplate() {
+            if (savedTemplates[currentType] !== undefined) {
+                templates[currentType] = savedTemplates[currentType];
+                renderEditor();
+                showToast('تم إلغاء التغييرات', 'success');
+            }
+        }
+
+        function getSampleData() {
+            return {
+                customerName: document.getElementById('sample-customerName').value,
+                orderId: document.getElementById('sample-orderId').value,
+                amount: document.getElementById('sample-amount').value,
+                currency: document.getElementById('sample-currency').value,
+                phone: document.getElementById('sample-phone').value,
+                date: document.getElementById('sample-date').value,
+                time: document.getElementById('sample-time').value,
+                service: document.getElementById('sample-service').value,
+                paymentMethod: document.getElementById('sample-paymentMethod').value,
+                barberName: document.getElementById('sample-barberName').value,
+                branchName: document.getElementById('sample-branchName').value,
+                bookingLink: document.getElementById('sample-bookingLink').value,
+                notes: document.getElementById('sample-notes').value,
+            };
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function updatePreview() {
+            const template = document.getElementById('template-editor').value;
+            templates[currentType] = template;
+            const data = getSampleData();
+            const preview = document.getElementById('whatsapp-preview');
+
+            // Use the same server-side renderer as the real send endpoint
+            try {
+                const res = await fetch('/api/templates/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: currentType,
+                        template: template,
+                        data: {
+                            ...data,
+                            services: data.service ? [data.service] : undefined
+                        }
+                    })
+                });
+                const result = await res.json();
+                if (result.success) {
+                    preview.innerHTML = escapeHtml(result.message).replace(/\n/g, '<br>');
+                } else {
+                    preview.innerHTML = '<span style="color:#e74c3c;">' + escapeHtml(result.error || 'خطأ في المعاينة') + '</span>';
+                }
+            } catch (err) {
+                preview.innerHTML = '<span style="color:#e74c3c;">خطأ في الاتصال بالسيرفر</span>';
+            }
+            updateCharCount();
+        }
+
+        function updateCharCount() {
+            const editor = document.getElementById('template-editor');
+            document.getElementById('char-count').textContent = editor.value.length + ' حرف';
+        }
+
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            setTimeout(() => toast.classList.add('show'), 10);
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // ========== Init ==========
+        window.addEventListener('DOMContentLoaded', loadTemplates);
+    </script>
+</body>
+</html>

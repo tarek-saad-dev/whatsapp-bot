@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign Details - Campaign Management</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .details-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .details-section {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .details-section h3 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .info-item {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .info-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #333;
+        }
+        .progress-section {
+            margin: 20px 0;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 10px 0;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            transition: width 0.5s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .messages-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .messages-table th,
+        .messages-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .messages-table th {
+            background: #f8f9fa;
+            font-weight: bold;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+            display: inline-block;
+        }
+        .status-badge.pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status-badge.sent {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-badge.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-card.success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .stat-card.danger {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+        .stat-card.warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .stat-label {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Campaign Details</h1>
+            <p class="subtitle" id="campaign-id">Loading campaign...</p>
+        </header>
+
+        <a href="campaign-list.html" class="back-link">← Back to Campaign List</a>
+
+        <div class="details-container">
+            <div id="loading" style="text-align: center; padding: 40px;">
+                <p>Loading campaign details...</p>
+            </div>
+
+            <div id="details-content" style="display: none;">
+                <!-- Campaign Info -->
+                <div class="details-section">
+                    <h3>📋 Campaign Information</h3>
+                    <div class="info-grid" id="campaign-info"></div>
+                </div>
+
+                <!-- Progress Stats -->
+                <div class="details-section">
+                    <h3>📈 Progress Statistics</h3>
+                    <div class="info-grid" id="progress-stats"></div>
+                    <div class="progress-section">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>Overall Progress</span>
+                            <span id="progress-text">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill" style="width: 0%">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Messages -->
+                <div class="details-section">
+                    <h3>💬 Messages</h3>
+                    <div style="margin-bottom: 15px;">
+                        <label>Filter by status: </label>
+                        <select id="status-filter" onchange="loadMessages()">
+                            <option value="">All</option>
+                            <option value="pending">Pending</option>
+                            <option value="sent">Sent</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                        <button onclick="loadMessages()" class="btn btn-secondary" style="margin-left: 10px;">Refresh</button>
+                    </div>
+                    <div id="messages-container">
+                        <table class="messages-table">
+                            <thead>
+                                <tr>
+                                    <th>Client ID</th>
+                                    <th>Phone</th>
+                                    <th>Status</th>
+                                    <th>Sent At</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody id="messages-tbody">
+                                <tr><td colspan="5" style="text-align: center;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="action-buttons">
+                    <button onclick="startCampaign()" id="start-btn" class="btn btn-primary" style="display: none;">Start Campaign</button>
+                    <button onclick="refreshDetails()" class="btn btn-secondary">Refresh</button>
+                    <a href="campaign-list.html" class="btn btn-secondary">Back to List</a>
+                </div>
+            </div>
+        </div>
+
+        <div id="success-message" class="alert alert-success" style="display: none; margin-top: 20px;"></div>
+        <div id="error-message" class="alert alert-error" style="display: none; margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const urlParams = new URLSearchParams(window.location.search);
+        const campaignId = urlParams.get('campaignId');
+
+        if (!campaignId) {
+            alert('No campaign ID provided. Redirecting...');
+            window.location.href = 'campaign-list.html';
+        }
+
+        async function loadCampaignDetails() {
+            try {
+                const [campaignResponse, statsResponse] = await Promise.all([
+                    fetch(`${API_BASE}/campaigns/offers/${campaignId}`),
+                    fetch(`${API_BASE}/campaigns/offers/${campaignId}/stats`)
+                ]);
+
+                if (!campaignResponse.ok || !statsResponse.ok) {
+                    throw new Error('Failed to load campaign details');
+                }
+
+                const campaign = await campaignResponse.json();
+                const stats = await statsResponse.json();
+
+                displayCampaignDetails(campaign, stats);
+                loadMessages();
+            } catch (error) {
+                document.getElementById('loading').innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        function displayCampaignDetails(campaign, stats) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('details-content').style.display = 'block';
+
+            document.getElementById('campaign-id').textContent = `Campaign ID: ${campaign.id}`;
+
+            // Campaign info
+            const campaignInfo = document.getElementById('campaign-info');
+            campaignInfo.innerHTML = `
+                <div class="info-item">
+                    <div class="info-label">Campaign ID</div>
+                    <div class="info-value">${campaign.id}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Offer ID</div>
+                    <div class="info-value">${campaign.offerId}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Status</div>
+                    <div class="info-value">
+                        <span class="status-badge ${campaign.status}">${campaign.status}</span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Total Recipients</div>
+                    <div class="info-value">${campaign.totalRecipients || 0}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Created At</div>
+                    <div class="info-value">${new Date(campaign.createdAt).toLocaleString()}</div>
+                </div>
+                ${campaign.startedAt ? `
+                <div class="info-item">
+                    <div class="info-label">Started At</div>
+                    <div class="info-value">${new Date(campaign.startedAt).toLocaleString()}</div>
+                </div>
+                ` : ''}
+                ${campaign.completedAt ? `
+                <div class="info-item">
+                    <div class="info-label">Completed At</div>
+                    <div class="info-value">${new Date(campaign.completedAt).toLocaleString()}</div>
+                </div>
+                ` : ''}
+            `;
+
+            // Progress stats
+            const messageStats = stats.messages || { total: 0, pending: 0, sent: 0, failed: 0 };
+            const progressStats = document.getElementById('progress-stats');
+            progressStats.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Total</div>
+                    <div class="stat-number">${messageStats.total}</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="stat-label">Sent</div>
+                    <div class="stat-number">${messageStats.sent}</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="stat-label">Pending</div>
+                    <div class="stat-number">${messageStats.pending}</div>
+                </div>
+                <div class="stat-card danger">
+                    <div class="stat-label">Failed</div>
+                    <div class="stat-number">${messageStats.failed}</div>
+                </div>
+            `;
+
+            // Progress bar
+            const total = messageStats.total || 1;
+            const processed = messageStats.sent + messageStats.failed;
+            const progress = (processed / total * 100).toFixed(1);
+            document.getElementById('progress-fill').style.width = `${progress}%`;
+            document.getElementById('progress-fill').textContent = `${progress}%`;
+            document.getElementById('progress-text').textContent = `${progress}%`;
+
+            // Start button
+            const startBtn = document.getElementById('start-btn');
+            if (campaign.status === 'draft') {
+                startBtn.style.display = 'inline-block';
+            } else {
+                startBtn.style.display = 'none';
+            }
+        }
+
+        async function loadMessages() {
+            const statusFilter = document.getElementById('status-filter').value;
+            const url = statusFilter 
+                ? `${API_BASE}/campaigns/offers/${campaignId}/messages?status=${statusFilter}`
+                : `${API_BASE}/campaigns/offers/${campaignId}/messages`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Failed to load messages');
+
+                const data = await response.json();
+                const messages = data.messages || [];
+
+                const tbody = document.getElementById('messages-tbody');
+                if (messages.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No messages found.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = messages.map(msg => `
+                    <tr>
+                        <td>${msg.clientId || 'N/A'}</td>
+                        <td>${msg.phone || 'N/A'}</td>
+                        <td><span class="status-badge ${msg.status}">${msg.status}</span></td>
+                        <td>${msg.sentAt ? new Date(msg.sentAt).toLocaleString() : '-'}</td>
+                        <td>${msg.errorMessage || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                document.getElementById('messages-tbody').innerHTML = 
+                    `<tr><td colspan="5" style="text-align: center; color: red;">Error: ${error.message}</td></tr>`;
+            }
+        }
+
+        async function startCampaign() {
+            if (!confirm('Start this campaign? Messages will begin sending automatically.')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/campaigns/offers/${campaignId}/start`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccess('✅ Campaign started! Messages are being processed.');
+                    setTimeout(() => refreshDetails(), 2000);
+                } else {
+                    showError(`❌ Error: ${result.error || 'Failed to start campaign'}`);
+                }
+            } catch (error) {
+                showError(`❌ Error: ${error.message}`);
+            }
+        }
+
+        function refreshDetails() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('details-content').style.display = 'none';
+            loadCampaignDetails();
+        }
+
+        function showSuccess(message) {
+            const el = document.getElementById('success-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showError(message) {
+            const el = document.getElementById('error-message');
+            el.textContent = message;
+            el.style.display = 'block';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        // Auto-refresh every 10 seconds
+        setInterval(() => {
+            if (document.getElementById('details-content').style.display !== 'none') {
+                loadCampaignDetails();
+            }
+        }, 10000);
+
+        // Initialize
+        loadCampaignDetails();
+    </script>
+</body>
+</html>
+
+
+

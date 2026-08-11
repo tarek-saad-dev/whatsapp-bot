@@ -1,0 +1,32 @@
+{
+  "sale": {
+    "name": "رسالة البيع",
+    "template": "نورتنا أ / {{customerName}}",
+    "updatedAt": "2026-07-05T19:23:35.976Z"
+  },
+  "booking": {
+    "name": "رسالة الحجز",
+    "template": "أهلاً {{customerName}} ✂️\n\nتم تأكيد حجزك في Cut Salon ✅\n\n📅 {{date}} | 🕐 {{time}}\n💇 {{service}}\n\nحابب تضيفها مع الحجز؟ قولنا 👍\n\nمنتظرينك 💈",
+    "updatedAt": "2026-06-25T19:43:15.439Z"
+  },
+  "first_time": {
+    "name": "رسالة عميل أول مرة",
+    "template": "أهلاً وسهلاً {{customerName}}! 🎉\n\nنورتنا في Cut Salon لأول مرة وفرحانين إنك اخترتنا 🙏✨\n\nنتمنى تكون التجربة عجبتك، ولو عندك أي ملاحظة احنا دايماً هنا لخدمتك.\n\nمنتظرينك تاني قريب 💈",
+    "updatedAt": "2026-06-23T02:40:10.790Z"
+  },
+  "employee_sale": {
+    "name": "رسالة بيع للموظف",
+    "template": "تم تسجيل فاتورة جديدة لك {{customerName}}:\nرقم الفاتورة: {{invoiceNumber}}\nالخدمات: {{services}}",
+    "updatedAt": "2026-07-09T21:34:21.996Z"
+  },
+  "employee_advance": {
+    "name": "رسالة سلفة للموظف",
+    "template": "تم تسجيل سلفة جديدة لك:\nالمبلغ: {{amount}} ج.م\nرقم العملية: {{invoiceNumber}}\nطريقة الدفع: {{paymentMethod}}",
+    "updatedAt": "2026-07-09T22:16:02.335Z"
+  },
+  "employee_daily_report": {
+    "name": "تقرير يوم الموظف",
+    "template": "🌙 تقرير يومك — Cut Salon\n{{workDate}}\n\n⏱ الحضور\nحضور: {{checkIn}}\nانصراف: {{checkOut}}\nساعات: {{actualHours}} من {{scheduledHours}}\nالحالة: {{statusLabelAr}}\n\n💰 الأساسي: {{baseWage}} ج.م\n{{baseWageNoteAr}}\n\n🎯 التارجت\nمستحق تارجت: {{targetAmount}} ج.م\n\n➖ خصم اليوم: {{deductions}} ج.م\n📌 صافي اليوم: {{dayNet}} ج.م\n\n━━━━━━━━━━━━\n📒 رصيد حسابك حتى الآن: {{ledgerBalance}} ج.م\n\nلو في أي ملاحظة على اليوم، كلّم الإدارة 🙂",
+    "updatedAt": "2026-07-15T23:30:55.839Z"
+  }
+}
