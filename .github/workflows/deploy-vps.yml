@@ -34,18 +34,17 @@ jobs:
           echo "GitHub SSH key fingerprint:"
           ssh-keygen -lf ~/.ssh/github_actions.pub
 
-          ssh-keyscan -H 187.77.75.79 >> ~/.ssh/known_hosts
+          ssh-keyscan -H 187.77.83.120 >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Test SSH connection
         run: |
           ssh \
-            -vv \
             -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o ConnectTimeout=20 \
-            root@187.77.75.79 \
+            root@187.77.83.120 \
             'echo "SSH_CONNECTION_OK"'
 
       - name: Deploy production
@@ -55,5 +54,5 @@ jobs:
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o ConnectTimeout=20 \
-            root@187.77.75.79 \
+            root@187.77.83.120 \
             'sudo /usr/local/sbin/deploy-whatsapp-bot'
