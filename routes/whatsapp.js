@@ -16,6 +16,7 @@ const MESSAGE_FIRST_TYPES = [QUICK_MESSAGE_TYPE, OTHER_TYPE, EMPLOYEE_DAILY_REPO
 /** Types that require POS-composed message (no local template). */
 const POS_MESSAGE_REQUIRED_TYPES = [QUICK_MESSAGE_TYPE, OTHER_TYPE];
 const SENDABLE_TYPES = [...new Set([...VALID_TYPES, ...MESSAGE_FIRST_TYPES, EMPLOYEE_FUNDING_TYPE])];
+const GENERIC_SEND_TYPE = 'generic';
 const WA_DEBUG_FULL_PHONE = process.env.WHATSAPP_DEBUG_FULL_PHONE === 'true';
 
 function maskPhone(phone) {
@@ -80,6 +81,33 @@ function validateRequest(body) {
 
     if (services !== undefined && !Array.isArray(services)) {
         return 'services must be an array';
+    }
+
+    return null;
+}
+
+function validateGenericRequest(body) {
+    if (!body || typeof body !== 'object' || Object.keys(body).length === 0) {
+        return 'Request body is required';
+    }
+
+    const { phone, message, metadata } = body;
+
+    if (!phone) {
+        return 'phone is required';
+    }
+
+    const normalizedPhone = normalizeEgyptianPhone(phone);
+    if (!normalizedPhone) {
+        return 'phone is invalid. Please provide a valid Egyptian mobile number';
+    }
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+        return 'message is required';
+    }
+
+    if (metadata !== undefined && (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata))) {
+        return 'metadata must be an object';
     }
 
     return null;
@@ -354,12 +382,53 @@ async function handleTypedSend(req, res) {
     }
 }
 
+async function handleGenericSend(req, res) {
+    try {
+        const validationError = validateGenericRequest(req.body);
+        if (validationError) {
+            return res.status(400).json({
+                success: false,
+                error: validationError
+            });
+        }
+
+        const normalizedPhone = normalizeEgyptianPhone(req.body.phone);
+        const message = req.body.message.trim();
+        const metadata = req.body.metadata;
+
+        return await sendAndRespond(res, {
+            type: GENERIC_SEND_TYPE,
+            normalizedPhone,
+            message,
+            templateSource: GENERIC_SEND_TYPE,
+            meta: metadata && typeof metadata === 'object' ? metadata : {},
+        });
+    } catch (error) {
+        console.error('Error in WhatsApp generic send:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to send the WhatsApp message. Please try again.'
+        });
+    }
+}
+
+function hasTypedSendType(body) {
+    return body && typeof body === 'object' && body.type !== undefined && body.type !== null;
+}
+
+async function handleSend(req, res) {
+    if (hasTypedSendType(req.body)) {
+        return handleTypedSend(req, res);
+    }
+    return handleGenericSend(req, res);
+}
+
 /**
  * POST /api/whatsapp/send
- * Local endpoint that sends a single WhatsApp message.
+ * Backward-compatible gateway: typed sends when `type` is present, generic send otherwise.
  * No authentication, no SQL Server, no campaigns, no offers, no SMS.
  */
-router.post('/send', handleTypedSend);
+router.post('/send', handleSend);
 
 /**
  * POST /api/admin/whatsapp/test-send

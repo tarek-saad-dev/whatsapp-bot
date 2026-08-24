@@ -794,3 +794,133 @@ describe('WhatsApp send API', () => {
     expect(res.body.templateSource).toBeTruthy();
   });
 });
+
+describe('WhatsApp generic send API', () => {
+  beforeEach(() => {
+    resetTestData();
+    writeTestTemplates();
+    vi.clearAllMocks();
+  });
+
+  it('sends {phone,message} without type as generic send', async () => {
+    const sendMessageAndWait = vi.spyOn(whatsappService, 'sendMessageAndWait').mockResolvedValue({
+      success: true,
+      status: 'sent',
+      messageId: 'wa-generic-1',
+    });
+
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({
+        phone: '01557994946',
+        message: 'رسالة عامة بدون type',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.status).toBe('sent');
+    expect(res.body.messageId).toBe('wa-generic-1');
+    expect(res.body.type).toBe('generic');
+    expect(res.body.phone).toBe('201557994946');
+    expect(res.body.message).toBe('رسالة عامة بدون type');
+    expect(res.body.templateSource).toBe('generic');
+    expect(sendMessageAndWait).toHaveBeenCalledTimes(1);
+    expect(sendMessageAndWait).toHaveBeenCalledWith(
+      '201557994946',
+      'رسالة عامة بدون type',
+      expect.any(Number),
+      expect.objectContaining({
+        logContext: expect.objectContaining({ type: 'generic' }),
+      }),
+    );
+  });
+
+  it('rejects generic send without phone', async () => {
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({ message: 'hello' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain('phone is required');
+  });
+
+  it('rejects generic send without message', async () => {
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({ phone: '01557994946' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain('message is required');
+  });
+
+  it('rejects generic send with invalid phone', async () => {
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({ phone: '12345', message: 'hello' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain('phone is invalid');
+  });
+
+  it('does not require customerName for generic send', async () => {
+    vi.spyOn(whatsappService, 'sendMessageAndWait').mockResolvedValue({
+      success: true,
+      status: 'sent',
+      messageId: 'wa-generic-2',
+    });
+
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({
+        phone: '01557994946',
+        message: 'بدون customerName',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.status).toBe('sent');
+    expect(res.body.messageId).toBeTruthy();
+  });
+
+  it('accepts optional metadata object for generic send', async () => {
+    vi.spyOn(whatsappService, 'sendMessageAndWait').mockResolvedValue({
+      success: true,
+      status: 'sent',
+      messageId: 'wa-generic-3',
+    });
+
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({
+        phone: '01557994946',
+        message: 'مع metadata',
+        metadata: { source: 'pos', orderId: 'ORD-99' },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.messageId).toBe('wa-generic-3');
+  });
+
+  it('returns 500 when generic send completes without messageId', async () => {
+    vi.spyOn(whatsappService, 'sendMessageAndWait').mockResolvedValue({
+      success: true,
+      status: 'sent',
+    });
+
+    const res = await request(app)
+      .post('/api/whatsapp/send')
+      .send({
+        phone: '01557994946',
+        message: 'test',
+      });
+
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(res.body.status).toBe('failed');
+    expect(res.body.error).toContain('messageId');
+  });
+});

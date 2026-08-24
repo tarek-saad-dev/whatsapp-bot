@@ -12,5 +12,145 @@
     "createdAt": "2025-11-17T20:02:27.660Z",
     "updatedAt": "2025-11-17T22:06:25.501Z",
     "lastExecutedAt": "2025-11-17T22:06:25.500Z"
+  },
+  {
+    "id": "17875361616460cwyfoz1f",
+    "name": "Test Segment Campaign",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:21.646Z",
+    "updatedAt": "2026-08-24T01:49:21.647Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "17875361616664neqq6wbf",
+    "name": "Update Test",
+    "description": "",
+    "messageTemplate": "Hello",
+    "segmentType": "this_week",
+    "phoneNumbers": [],
+    "status": "active",
+    "createdAt": "2026-08-24T01:49:21.666Z",
+    "updatedAt": "2026-08-24T01:49:21.683Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787536161835k6ifon3ls",
+    "name": "Empty Campaign",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:21.835Z",
+    "updatedAt": "2026-08-24T01:49:21.835Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "17875361752814fvfyutgo",
+    "name": "Segment Campaign",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [
+      "201234567890"
+    ],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:35.281Z",
+    "updatedAt": "2026-08-24T01:49:35.281Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787536175326xrangfakj",
+    "name": "Campaign One",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [
+      "201234567890"
+    ],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:35.326Z",
+    "updatedAt": "2026-08-24T01:49:35.327Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787536175375rfxe4d5ni",
+    "name": "New",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [
+      "201234567890"
+    ],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:35.375Z",
+    "updatedAt": "2026-08-24T01:49:35.391Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787536175476ng4ke57mh",
+    "name": "Exec",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [
+      "201234567890"
+    ],
+    "status": "active",
+    "createdAt": "2026-08-24T01:49:35.476Z",
+    "updatedAt": "2026-08-24T01:49:35.493Z",
+    "lastExecutedAt": "2026-08-24T01:49:35.492Z"
+  },
+  {
+    "id": "17875362375193tf0s4zdk",
+    "name": "Segment Campaign",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:37.519Z",
+    "updatedAt": "2026-08-24T01:50:37.519Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787536237561j9mmggxt3",
+    "name": "Campaign One",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:37.561Z",
+    "updatedAt": "2026-08-24T01:50:37.561Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "17875362376119698w4zdu",
+    "name": "New",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:37.611Z",
+    "updatedAt": "2026-08-24T01:50:37.630Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787536237729ii9lbnqsn",
+    "name": "Exec",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:37.729Z",
+    "updatedAt": "2026-08-24T01:50:37.729Z",
+    "lastExecutedAt": null
   }
 ]

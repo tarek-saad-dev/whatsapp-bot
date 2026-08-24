@@ -7,5 +7,30 @@
     "lastPurchaseDate": "2025-11-16",
     "createdAt": "2025-11-17T19:59:46.315Z",
     "updatedAt": "2025-11-17T19:59:46.315Z"
+  },
+  {
+    "id": "1787536163191",
+    "phone": "201000111222",
+    "name": "Bob",
+    "createdAt": "2026-08-24T01:49:23.191Z",
+    "updatedAt": "2026-08-24T01:50:35.104Z"
+  },
+  {
+    "id": "1787536163226",
+    "phone": "201333444555",
+    "name": "LastMonth",
+    "lastVisitDate": "2026-07-25",
+    "lastPurchaseDate": null,
+    "createdAt": "2026-08-24T01:49:23.226Z",
+    "updatedAt": "2026-08-24T01:49:23.226Z"
+  },
+  {
+    "id": "1787536235104mpn29lub9",
+    "phone": "201234567890",
+    "name": "Alice",
+    "lastVisitDate": null,
+    "lastPurchaseDate": null,
+    "createdAt": "2026-08-24T01:50:35.104Z",
+    "updatedAt": "2026-08-24T01:50:35.104Z"
   }
 ]

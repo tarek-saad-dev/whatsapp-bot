@@ -1,8 +1,8 @@
 {
   "sale": {
     "name": "رسالة البيع",
-    "template": "نورتنا أ / {{customerName}}",
-    "updatedAt": "2026-07-05T19:23:35.976Z"
+    "template": "Hello {{customerName}}",
+    "updatedAt": "2026-08-24T01:50:39.872Z"
   },
   "booking": {
     "name": "رسالة الحجز",

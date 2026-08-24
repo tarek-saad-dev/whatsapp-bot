@@ -1,1 +1,112 @@
-[]
+[
+  {
+    "id": "1787536161857ls1vod9i1",
+    "campaignId": "campaign-1",
+    "clientId": "client-1",
+    "phone": "201234567890",
+    "messageBody": "Test",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:45.956Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:21.857Z"
+  },
+  {
+    "id": "17875361618753by16fdoj",
+    "campaignId": "campaign-1",
+    "clientId": "client-1",
+    "phone": "201234567890",
+    "messageBody": "Test",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:21.892Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:21.875Z"
+  },
+  {
+    "id": "1787536164237ihi466tpg",
+    "campaignId": "1787536164234nezg8b32b",
+    "clientId": "client-1",
+    "phone": "201234567890",
+    "messageBody": "Hello",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:24.261Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:24.237Z"
+  },
+  {
+    "id": "178753616430230co8xlrq",
+    "campaignId": "17875361643019gqbwdyvv",
+    "clientId": "client-1",
+    "phone": "201234567890",
+    "messageBody": "Hello",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:24.319Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:24.302Z"
+  },
+  {
+    "id": "1787536164363znrk6c3e4",
+    "campaignId": "178753616436223qxcj8ud",
+    "clientId": "client-1",
+    "phone": "201234567890",
+    "messageBody": "Hello",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:24.384Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:24.363Z"
+  },
+  {
+    "id": "1787536164424ia72sg1exgtj",
+    "campaignId": "1787536164423qer9fmgqc",
+    "clientId": "client-1",
+    "phone": "201234567890",
+    "messageBody": "One",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:24.443Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:24.424Z"
+  },
+  {
+    "id": "1787536164424yggx13n1zu1t",
+    "campaignId": "1787536164423qer9fmgqc",
+    "clientId": "client-2",
+    "phone": "201000111222",
+    "messageBody": "Two",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:45.973Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:24.424Z"
+  },
+  {
+    "id": "1787536185934wawkyeny7re7",
+    "campaignId": "1787536185919l55ks575w",
+    "clientId": "a1",
+    "phone": "201234567890",
+    "messageBody": "A1",
+    "status": "sent",
+    "sentAt": "2026-08-24T01:49:45.989Z",
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:45.934Z"
+  },
+  {
+    "id": "1787536185934gr7v0hdapgfw",
+    "campaignId": "1787536185919l55ks575w",
+    "clientId": "a2",
+    "phone": "201000111222",
+    "messageBody": "A2",
+    "status": "pending",
+    "sentAt": null,
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:45.934Z"
+  },
+  {
+    "id": "17875361859344u65tf4na5sm",
+    "campaignId": "1787536185933ymtt00259",
+    "clientId": "b1",
+    "phone": "201333444555",
+    "messageBody": "B1",
+    "status": "pending",
+    "sentAt": null,
+    "errorMessage": null,
+    "createdAt": "2026-08-24T01:49:45.934Z"
+  }
+]

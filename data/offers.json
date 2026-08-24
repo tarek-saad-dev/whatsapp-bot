@@ -75,5 +75,170 @@
     "status": "active",
     "createdAt": "2025-11-27T19:02:32.790Z",
     "updatedAt": "2025-11-27T19:02:32.790Z"
+  },
+  {
+    "id": "178753617208384txm90yk",
+    "name": "Summer Sale",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:32.083Z",
+    "updatedAt": "2026-08-24T01:49:32.083Z"
+  },
+  {
+    "id": "1787536172118u42m0cd88",
+    "name": "Test Offer",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:32.118Z",
+    "updatedAt": "2026-08-24T01:49:32.118Z"
+  },
+  {
+    "id": "1787536172152a6nop83qm",
+    "name": "New",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:32.152Z",
+    "updatedAt": "2026-08-24T01:49:32.176Z"
+  },
+  {
+    "id": "17875361722316dec8hzm5",
+    "name": "Targeted",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:32.231Z",
+    "updatedAt": "2026-08-24T01:49:32.231Z"
+  },
+  {
+    "id": "1787536172272k6v77g7g8",
+    "name": "Empty",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:32.272Z",
+    "updatedAt": "2026-08-24T01:49:32.272Z"
+  },
+  {
+    "id": "17875361723173vkuf7zh1",
+    "name": "Build",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:32.317Z",
+    "updatedAt": "2026-08-24T01:49:32.317Z"
+  },
+  {
+    "id": "17875361754381rdjp27by",
+    "name": "Offer Campaign",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:35.438Z",
+    "updatedAt": "2026-08-24T01:49:35.438Z"
+  },
+  {
+    "id": "178753618417441q2pl9m6",
+    "name": "Lifecycle Offer",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:49:44.174Z",
+    "updatedAt": "2026-08-24T01:49:44.174Z"
+  },
+  {
+    "id": "1787536231672a7efie9pu",
+    "name": "Summer Sale",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:31.672Z",
+    "updatedAt": "2026-08-24T01:50:31.672Z"
+  },
+  {
+    "id": "17875362317040r8mhep9y",
+    "name": "Test Offer",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:31.704Z",
+    "updatedAt": "2026-08-24T01:50:31.704Z"
+  },
+  {
+    "id": "17875362317321842xox0o",
+    "name": "New",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:31.732Z",
+    "updatedAt": "2026-08-24T01:50:31.747Z"
+  },
+  {
+    "id": "1787536231793tplbozzjz",
+    "name": "Targeted",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:31.793Z",
+    "updatedAt": "2026-08-24T01:50:31.793Z"
+  },
+  {
+    "id": "1787536231820g5aseiswx",
+    "name": "Empty",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:31.820Z",
+    "updatedAt": "2026-08-24T01:50:31.820Z"
+  },
+  {
+    "id": "1787536231848nunz524y6",
+    "name": "Build",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:31.848Z",
+    "updatedAt": "2026-08-24T01:50:31.848Z"
+  },
+  {
+    "id": "1787536237680qsm1zo1mj",
+    "name": "Offer Campaign",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-24T01:50:37.680Z",
+    "updatedAt": "2026-08-24T01:50:37.680Z"
   }
 ]
