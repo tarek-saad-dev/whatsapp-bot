@@ -20,7 +20,6 @@ jobs:
     steps:
       - name: Configure SSH
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
@@ -35,31 +34,26 @@ jobs:
           echo "GitHub SSH key fingerprint:"
           ssh-keygen -lf ~/.ssh/github_actions.pub
 
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -H 187.77.75.79 >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Test SSH connection
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh \
+            -vv \
             -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o ConnectTimeout=20 \
-            "$VPS_USER@$VPS_HOST" \
+            root@187.77.75.79 \
             'echo "SSH_CONNECTION_OK"'
 
       - name: Deploy production
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh \
             -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o ConnectTimeout=20 \
-            "$VPS_USER@$VPS_HOST" \
+            root@187.77.75.79 \
             'sudo /usr/local/sbin/deploy-whatsapp-bot'
