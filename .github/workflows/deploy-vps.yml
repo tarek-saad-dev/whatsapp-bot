@@ -29,8 +29,27 @@ jobs:
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
+          echo "Validating SSH private key..."
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/github_actions.pub
+
+          echo "GitHub SSH key fingerprint:"
+          ssh-keygen -lf ~/.ssh/github_actions.pub
+
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+      - name: Test SSH connection
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            "$VPS_USER@$VPS_HOST" \
+            'echo "SSH_CONNECTION_OK"'
 
       - name: Deploy production
         env:
@@ -39,6 +58,7 @@ jobs:
         run: |
           ssh \
             -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o ConnectTimeout=20 \
             "$VPS_USER@$VPS_HOST" \
