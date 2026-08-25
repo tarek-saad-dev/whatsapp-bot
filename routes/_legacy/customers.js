@@ -1,3 +1,4 @@
+/** @legacy-unused production campaign path — Phase 7 audience is ERP-owned (TblClient queries). This JSON customers API remains for legacy bot UI only. */
 const express = require('express');
 const router = express.Router();
 const customerModel = require('../models/customer');

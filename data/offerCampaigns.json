@@ -178,24 +178,24 @@
   {
     "id": "1787536185919l55ks575w",
     "offerId": "offer-a",
-    "status": "draft",
+    "status": "completed",
     "totalRecipients": 2,
-    "sentCount": 1,
+    "sentCount": 2,
     "failedCount": 0,
     "createdAt": "2026-08-24T01:49:45.919Z",
     "startedAt": null,
-    "completedAt": null
+    "completedAt": "2026-08-25T04:10:58.891Z"
   },
   {
     "id": "1787536185933ymtt00259",
     "offerId": "offer-b",
-    "status": "draft",
+    "status": "completed",
     "totalRecipients": 1,
-    "sentCount": 0,
+    "sentCount": 1,
     "failedCount": 0,
     "createdAt": "2026-08-24T01:49:45.933Z",
     "startedAt": null,
-    "completedAt": null
+    "completedAt": "2026-08-25T04:10:58.913Z"
   },
   {
     "id": "1787536237710irqbeu09t",
@@ -205,6 +205,105 @@
     "sentCount": 0,
     "failedCount": 0,
     "createdAt": "2026-08-24T01:50:37.710Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1787631053166rs9jghiwr",
+    "offerId": "offer-1",
+    "status": "completed",
+    "totalRecipients": 1,
+    "sentCount": 1,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:10:53.166Z",
+    "startedAt": null,
+    "completedAt": "2026-08-25T04:10:53.206Z"
+  },
+  {
+    "id": "1787631053216gxxiox88u",
+    "offerId": "offer-1",
+    "status": "completed",
+    "totalRecipients": 1,
+    "sentCount": 1,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:10:53.216Z",
+    "startedAt": null,
+    "completedAt": "2026-08-25T04:10:53.238Z"
+  },
+  {
+    "id": "178763105324930zg0z8m2",
+    "offerId": "offer-1",
+    "status": "completed",
+    "totalRecipients": 1,
+    "sentCount": 1,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:10:53.249Z",
+    "startedAt": null,
+    "completedAt": "2026-08-25T04:10:53.274Z"
+  },
+  {
+    "id": "17876310532859lh1186gw",
+    "offerId": "offer-1",
+    "status": "completed",
+    "totalRecipients": 2,
+    "sentCount": 2,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:10:53.286Z",
+    "startedAt": null,
+    "completedAt": "2026-08-25T04:10:58.943Z"
+  },
+  {
+    "id": "1787631058838p1fw3xrgk",
+    "offerId": "offer-a",
+    "status": "draft",
+    "totalRecipients": 2,
+    "sentCount": 1,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:10:58.838Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1787631058853a4j96s76w",
+    "offerId": "offer-b",
+    "status": "draft",
+    "totalRecipients": 1,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:10:58.853Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "17876310698582euft3s7k",
+    "offerId": "1787631069843ccu0m4ini",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:11:09.858Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1787631074461c8yj5eqb9",
+    "offerId": "offer-1",
+    "status": "draft",
+    "totalRecipients": 0,
+    "sentCount": 0,
+    "failedCount": 0,
+    "createdAt": "2026-08-25T04:11:14.461Z",
+    "startedAt": null,
+    "completedAt": null
+  },
+  {
+    "id": "1787631074477wnqt7d9rf",
+    "offerId": "offer-1",
+    "status": "draft",
+    "totalRecipients": 2,
+    "sentCount": 1,
+    "failedCount": 1,
+    "createdAt": "2026-08-25T04:11:14.477Z",
     "startedAt": null,
     "completedAt": null
   }

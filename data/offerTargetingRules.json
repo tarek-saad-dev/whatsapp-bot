@@ -152,5 +152,61 @@
     "minSpend": null,
     "createdAt": "2026-08-24T01:50:31.867Z",
     "updatedAt": "2026-08-24T01:50:31.867Z"
+  },
+  {
+    "id": "1787631065127vmw35g17s",
+    "offerId": "1787631065113em2r2kzu9",
+    "gender": null,
+    "city": "Cairo",
+    "maritalStatus": null,
+    "cameFrom": null,
+    "lastVisitFrom": null,
+    "lastVisitTo": null,
+    "minVisits": 2,
+    "minSpend": null,
+    "createdAt": "2026-08-25T04:11:05.127Z",
+    "updatedAt": "2026-08-25T04:11:05.127Z"
+  },
+  {
+    "id": "1787631065176l556t8t3a",
+    "offerId": "1787631065165vcf8466nv",
+    "gender": null,
+    "city": "Cairo",
+    "maritalStatus": null,
+    "cameFrom": null,
+    "lastVisitFrom": null,
+    "lastVisitTo": null,
+    "minVisits": null,
+    "minSpend": null,
+    "createdAt": "2026-08-25T04:11:05.176Z",
+    "updatedAt": "2026-08-25T04:11:05.176Z"
+  },
+  {
+    "id": "1787631067559pf5pm3q2k",
+    "offerId": "1787631067545upp2xzymr",
+    "gender": null,
+    "city": "Cairo",
+    "maritalStatus": null,
+    "cameFrom": null,
+    "lastVisitFrom": null,
+    "lastVisitTo": null,
+    "minVisits": 1,
+    "minSpend": null,
+    "createdAt": "2026-08-25T04:11:07.559Z",
+    "updatedAt": "2026-08-25T04:11:07.559Z"
+  },
+  {
+    "id": "17876374874102ma1apars",
+    "offerId": "17876374275858b4xvwsni",
+    "gender": null,
+    "city": "Cairo",
+    "maritalStatus": null,
+    "cameFrom": null,
+    "lastVisitFrom": null,
+    "lastVisitTo": null,
+    "minVisits": null,
+    "minSpend": null,
+    "createdAt": "2026-08-25T05:58:07.410Z",
+    "updatedAt": "2026-08-25T05:58:07.410Z"
   }
 ]

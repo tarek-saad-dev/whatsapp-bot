@@ -152,5 +152,89 @@
     "createdAt": "2026-08-24T01:50:37.729Z",
     "updatedAt": "2026-08-24T01:50:37.729Z",
     "lastExecutedAt": null
+  },
+  {
+    "id": "1787631069748ncyr26ggj",
+    "name": "Segment Campaign",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:09.748Z",
+    "updatedAt": "2026-08-25T04:11:09.748Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787631069773d7wpefp25",
+    "name": "Campaign One",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:09.773Z",
+    "updatedAt": "2026-08-25T04:11:09.773Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "17876310698026pweydon5",
+    "name": "New",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:09.802Z",
+    "updatedAt": "2026-08-25T04:11:09.815Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787631069869tuycxi9m8",
+    "name": "Exec",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:09.869Z",
+    "updatedAt": "2026-08-25T04:11:09.869Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787631074410tte7act6l",
+    "name": "Test Segment Campaign",
+    "description": "",
+    "messageTemplate": "Hi {{name}}",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:14.410Z",
+    "updatedAt": "2026-08-25T04:11:14.411Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787631074423ygtuiwik7",
+    "name": "Update Test",
+    "description": "",
+    "messageTemplate": "Hello",
+    "segmentType": "this_week",
+    "phoneNumbers": [],
+    "status": "active",
+    "createdAt": "2026-08-25T04:11:14.423Z",
+    "updatedAt": "2026-08-25T04:11:14.433Z",
+    "lastExecutedAt": null
+  },
+  {
+    "id": "1787631074529eya2ocr90",
+    "name": "Empty Campaign",
+    "description": "",
+    "messageTemplate": "Hi",
+    "segmentType": "today",
+    "phoneNumbers": [],
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:14.529Z",
+    "updatedAt": "2026-08-25T04:11:14.529Z",
+    "lastExecutedAt": null
   }
 ]

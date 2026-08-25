@@ -1,3 +1,4 @@
+/** @legacy-unused production — Phase 7 campaigns owned by casher ERP messaging module. Kept for admin/legacy UI. */
 const express = require('express');
 const router = express.Router();
 const campaignModel = require('../models/campaign');

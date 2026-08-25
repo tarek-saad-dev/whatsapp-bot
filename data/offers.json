@@ -240,5 +240,104 @@
     "status": "draft",
     "createdAt": "2026-08-24T01:50:37.680Z",
     "updatedAt": "2026-08-24T01:50:37.680Z"
+  },
+  {
+    "id": "17876310650068r6krgaek",
+    "name": "Summer Sale",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:05.006Z",
+    "updatedAt": "2026-08-25T04:11:05.006Z"
+  },
+  {
+    "id": "1787631065030zaaixj49p",
+    "name": "Test Offer",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:05.030Z",
+    "updatedAt": "2026-08-25T04:11:05.030Z"
+  },
+  {
+    "id": "1787631065059fkmalte4j",
+    "name": "New",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:05.059Z",
+    "updatedAt": "2026-08-25T04:11:05.073Z"
+  },
+  {
+    "id": "1787631065113em2r2kzu9",
+    "name": "Targeted",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:05.113Z",
+    "updatedAt": "2026-08-25T04:11:05.113Z"
+  },
+  {
+    "id": "1787631065133ersdwzmo3",
+    "name": "Empty",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:05.133Z",
+    "updatedAt": "2026-08-25T04:11:05.133Z"
+  },
+  {
+    "id": "1787631065165vcf8466nv",
+    "name": "Build",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:05.165Z",
+    "updatedAt": "2026-08-25T04:11:05.165Z"
+  },
+  {
+    "id": "1787631067545upp2xzymr",
+    "name": "Lifecycle Offer",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:07.545Z",
+    "updatedAt": "2026-08-25T04:11:07.545Z"
+  },
+  {
+    "id": "1787631069843ccu0m4ini",
+    "name": "Offer Campaign",
+    "description": "",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T04:11:09.843Z",
+    "updatedAt": "2026-08-25T04:11:09.843Z"
+  },
+  {
+    "id": "17876374275858b4xvwsni",
+    "name": "db-probe-offer",
+    "description": "probe",
+    "minAge": null,
+    "maxAge": null,
+    "formUrl": null,
+    "status": "draft",
+    "createdAt": "2026-08-25T05:57:07.585Z",
+    "updatedAt": "2026-08-25T05:57:07.585Z"
   }
 ]

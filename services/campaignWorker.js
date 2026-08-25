@@ -1,5 +1,8 @@
 /**
  * Campaign Worker Service
+ * @legacy-unused production — Phase 7 campaigns enqueue via casher TblMessageOutbox + messaging-outbox-worker.
+ * Kept when ENABLE_CAMPAIGN_WORKER=true for legacy bot offer campaigns only.
+ *
  * Processes pending campaign messages and sends them via WhatsApp
  */
 

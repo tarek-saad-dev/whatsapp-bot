@@ -11,14 +11,18 @@ let pool = null;
  * Get database configuration from environment variables
  */
 function getDbConfig() {
+    const port = parseInt(process.env.DB_PORT || '1433', 10);
     return {
         server: process.env.DB_SERVER || 'DESKTOP-EUN2CV2',
-        database: process.env.DB_NAME || 'HawaiDB',
+        port: Number.isFinite(port) ? port : 1433,
+        database: process.env.DB_NAME || process.env.DB_DATABASE || 'HawaiDB',
         user: process.env.DB_USER || 'it',
         password: process.env.DB_PASSWORD || '123',
         options: {
             encrypt: process.env.DB_ENCRYPT === 'true', // Use true for Azure
-            trustServerCertificate: process.env.DB_TRUST_CERT === 'true', // Use true for local dev
+            trustServerCertificate:
+                process.env.DB_TRUST_CERT === 'true' ||
+                process.env.DB_TRUST_SERVER_CERTIFICATE === 'true',
             enableArithAbort: true,
             connectionTimeout: 30000,
             requestTimeout: 30000

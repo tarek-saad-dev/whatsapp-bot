@@ -2,46 +2,19 @@ require('dotenv').config();
 
 const { execSync } = require('child_process');
 const express = require('express');
-const path = require('path');
-const campaignsRouter = require('./routes/campaigns');
-const customersRouter = require('./routes/customers');
-const salesRouter = require('./routes/sales');
-const offersRouter = require('./routes/offers');
-const templatesRouter = require('./routes/templates');
 const whatsappRouter = require('./routes/whatsapp');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from public directory
-app.use(express.static(path.join(__dirname, 'public')));
-
-// API Routes
-app.use('/api/campaigns', campaignsRouter);
-app.use('/api/customers', customersRouter);
-app.use('/api/sales', salesRouter);
-app.use('/api/offers', offersRouter);
-app.use('/api/templates', templatesRouter);
 app.use('/api/whatsapp', whatsappRouter);
-app.use('/api/admin/whatsapp', whatsappRouter);
 
-// Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-
-// Serve the main HTML file
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Lazy-load services so tests can import app without triggering side effects
-const whatsappService = require('./services/whatsappService');
-const campaignWorker = require('./services/campaignWorker');
 
 function freePort(port) {
     console.log(`Cleaning port ${port}...`);
@@ -70,8 +43,6 @@ function freePort(port) {
             for (const line of lines) {
                 const parts = line.split(/\s+/);
 
-                // Example:
-                // TCP 0.0.0.0:3000 0.0.0.0:0 LISTENING 12345
                 const localAddress = parts[1];
                 const state = parts[3];
                 const pid = parts[4];
@@ -103,7 +74,6 @@ function freePort(port) {
             return;
         }
 
-        // macOS / Linux fallback
         let output = '';
 
         try {
@@ -135,15 +105,12 @@ function freePort(port) {
 function listen() {
     return new Promise((resolve, reject) => {
         const server = app.listen(PORT, () => {
-            console.log(`🚀 Campaign Management Server running on http://localhost:${PORT}`);
-            console.log(`📱 Open your browser and navigate to http://localhost:${PORT}`);
-            console.log(`🔔 Auto-message endpoint: http://localhost:${PORT}/api/sales/notify`);
-            console.log(`📤 Local send endpoint: http://localhost:${PORT}/api/whatsapp/send`);
-            console.log(`\n💡 On first run, scan the QR code when Chrome opens for WhatsApp Web`);
-            console.log(`\n⚠️  IMPORTANT: Chrome requires an interactive Windows session to open.`);
-            console.log(`   If Chrome doesn't open, ensure you're running: node server.js`);
-            console.log(`   (not as a Windows Service or non-interactive session)`);
-            console.log(`   See RUNNING_INSTRUCTIONS.md for details.\n`);
+            console.log(`WhatsApp Messaging Gateway running on http://localhost:${PORT}`);
+            console.log(`Health:  http://localhost:${PORT}/api/health`);
+            console.log(`Send:    http://localhost:${PORT}/api/whatsapp/send`);
+            console.log(`Status:  http://localhost:${PORT}/api/whatsapp/status`);
+            console.log(`\nOn first run, scan the QR code when Chrome opens for WhatsApp Web.`);
+            console.log(`Chrome requires an interactive Windows session to open.\n`);
             resolve(server);
         });
 
@@ -152,20 +119,11 @@ function listen() {
 }
 
 /**
- * Start the Express server and campaign worker.
- * This is called by `node server.js` and by launcher.js. Tests import `app`
- * without calling this function, so workers and HTTP listeners stay disabled.
+ * Start the Express gateway. Tests import `app` without calling this function.
  */
 async function startServer() {
-    console.log('Starting WhatsApp Bot Server...');
-    console.log('💡 WhatsApp service will initialize automatically when first message is received');
-
-    // The campaign worker is intentionally not started for the local send endpoint.
-    // Campaign execution is handled separately when needed.
-    if (process.env.ENABLE_CAMPAIGN_WORKER === 'true') {
-        campaignWorker.startWorker();
-        console.log('💡 Campaign worker started - will process pending messages automatically');
-    }
+    console.log('Starting WhatsApp Messaging Gateway...');
+    console.log('WhatsApp service will initialize automatically when the first message is sent.');
 
     freePort(PORT);
 
@@ -182,10 +140,9 @@ async function startServer() {
     }
 }
 
-// Start the server only when this file is the entry point
 if (require.main === module) {
     startServer().catch(err => {
-        console.error('Failed to start server:', err);
+        console.error('Failed to start gateway:', err);
         process.exit(1);
     });
 }
