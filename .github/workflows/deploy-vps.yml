@@ -17,11 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    env:
+      VPS_HOST: 187.77.83.120
+
     steps:
       - name: Configure SSH
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
@@ -34,25 +38,46 @@ jobs:
           echo "GitHub SSH key fingerprint:"
           ssh-keygen -lf ~/.ssh/github_actions.pub
 
-          ssh-keyscan -H 187.77.83.120 >> ~/.ssh/known_hosts
+          touch ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+          echo "Fetching host key for ${VPS_HOST}..."
+          keyscan_ok=0
+          for attempt in 1 2 3; do
+            if ssh-keyscan -T 15 -p 22 -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null; then
+              keyscan_ok=1
+              echo "Host key stored on attempt ${attempt}"
+              break
+            fi
+            echo "ssh-keyscan attempt ${attempt} failed, retrying in 5s..."
+            sleep 5
+          done
+
+          if [ "${keyscan_ok}" -ne 1 ]; then
+            echo "Warning: ssh-keyscan failed after 3 attempts."
+            echo "SSH steps will use StrictHostKeyChecking=accept-new for ${VPS_HOST}."
+          fi
 
       - name: Test SSH connection
         run: |
+          set -euo pipefail
           ssh \
             -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
-            -o ConnectTimeout=20 \
-            root@187.77.83.120 \
+            -o ConnectTimeout=30 \
+            -o StrictHostKeyChecking=accept-new \
+            "root@${VPS_HOST}" \
             'echo "SSH_CONNECTION_OK"'
 
       - name: Deploy production
         run: |
+          set -euo pipefail
           ssh \
             -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
-            -o ConnectTimeout=20 \
-            root@187.77.83.120 \
+            -o ConnectTimeout=30 \
+            -o StrictHostKeyChecking=accept-new \
+            "root@${VPS_HOST}" \
             'sudo /usr/local/sbin/deploy-whatsapp-bot'
