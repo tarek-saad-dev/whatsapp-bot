@@ -108,6 +108,7 @@ function listen() {
             console.log(`WhatsApp Messaging Gateway running on http://localhost:${PORT}`);
             console.log(`Health:  http://localhost:${PORT}/api/health`);
             console.log(`Send:    http://localhost:${PORT}/api/whatsapp/send`);
+            console.log(`Group:   http://localhost:${PORT}/api/whatsapp/send-group`);
             console.log(`Status:  http://localhost:${PORT}/api/whatsapp/status`);
             console.log(`\nOn first run, scan the QR code when Chrome opens for WhatsApp Web.`);
             console.log(`Chrome requires an interactive Windows session to open.\n`);

@@ -7,6 +7,7 @@ const http = require('http');
 const { Builder, By, Key } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const { createSendQueue } = require('./sendQueue');
+const { groupWebUrlFromInviteLink, normalizeGroupName } = require('./groupTarget');
 
 // --- Fixed singleton configuration ---
 const DEBUG_PORT = Number(process.env.WHATSAPP_DEBUG_PORT) || 9222;
@@ -45,6 +46,37 @@ function chatIdFromPhone(phone) {
 function makeMessageId(phone) {
   return `wa-${Date.now()}-${String(phone).replace(/\D/g, '').slice(-8)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+function makeGroupMessageId(targetKey) {
+  const safe = String(targetKey || 'group').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+  return `wa-grp-${Date.now()}-${safe}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const COMPOSE_SELECTORS = [
+  'div[contenteditable="true"][data-tab="10"]',
+  'div[contenteditable="true"][data-tab="1"]',
+  'footer div[contenteditable="true"]',
+  'div[role="textbox"][contenteditable="true"]',
+  'div[aria-placeholder][contenteditable="true"]',
+];
+
+const SEARCH_SELECTORS = [
+  'div[contenteditable="true"][data-tab="3"]',
+  'div[title="Search input textbox"]',
+  'div[role="textbox"][title*="Search"]',
+  '[aria-label="Search input textbox"]',
+];
+
+const CONTACT_PICKER_SEARCH_SELECTORS = [
+  'div[data-animate-modal-popup="true"] div[contenteditable="true"]',
+  'div[role="dialog"] div[contenteditable="true"]',
+  '[aria-label="Search name or number"]',
+  '[aria-label="Type a name or phone number"]',
+  'div[title="Search contacts"]',
+  'div[title="Search name or number"]',
+  'div[contenteditable="true"][data-tab="2"]',
+  'div[contenteditable="true"][data-tab="3"]',
+];
 
 function loadSettings() {
     return {
@@ -326,6 +358,200 @@ async function detectInvalidPhonePage(drv) {
     return null;
 }
 
+async function findComposeBox(drv, timeoutMs = 60000, invalidCheck = null) {
+    const composeStart = Date.now();
+    while ((Date.now() - composeStart) < timeoutMs) {
+        if (invalidCheck) {
+            const invalid = await invalidCheck();
+            if (invalid) return { invalid };
+        }
+        for (const sel of COMPOSE_SELECTORS) {
+            try {
+                const inputBox = await drv.findElement(By.css(sel));
+                console.log(`📝 Compose box found with selector: ${sel}`);
+                return { inputBox };
+            } catch (_) { /* try next */ }
+        }
+        await sleep(1000);
+    }
+    return { error: 'Could not find compose box within timeout' };
+}
+
+async function submitComposeBox(drv, inputBox, message, { prefillOnly = false } = {}) {
+    await sleep(2000);
+
+    let box = inputBox;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            await box.click();
+            break;
+        } catch (error) {
+            const stale = String(error.message || '').includes('stale element');
+            if (!stale || attempt === 2) throw error;
+            const refound = await findComposeBox(drv, 10000);
+            if (!refound.inputBox) throw error;
+            box = refound.inputBox;
+        }
+    }
+
+    await sleep(500);
+    if (!prefillOnly && message) {
+        await box.sendKeys(message);
+        await sleep(300);
+    }
+    await box.sendKeys(Key.ENTER);
+}
+
+async function findSearchBox(drv) {
+    for (const sel of SEARCH_SELECTORS) {
+        try {
+            return await drv.findElement(By.css(sel));
+        } catch (_) { /* try next */ }
+    }
+
+    try {
+        const icon = await drv.findElement(By.css('[data-icon="search"]'));
+        await icon.click();
+        await sleep(500);
+        for (const sel of SEARCH_SELECTORS) {
+            try {
+                return await drv.findElement(By.css(sel));
+            } catch (_) { /* try next */ }
+        }
+    } catch (_) {
+        /* ignore */
+    }
+
+    return null;
+}
+
+async function findContactPickerSearch(drv, timeoutMs = 20000) {
+    const start = Date.now();
+    while ((Date.now() - start) < timeoutMs) {
+        for (const sel of CONTACT_PICKER_SEARCH_SELECTORS) {
+            try {
+                const el = await drv.findElement(By.css(sel));
+                return el;
+            } catch (_) { /* try next */ }
+        }
+
+        try {
+            const icon = await drv.findElement(By.css('[data-icon="search"]'));
+            await icon.click();
+            await sleep(400);
+        } catch (_) {
+            /* ignore */
+        }
+
+        await sleep(500);
+    }
+    return null;
+}
+
+async function openGroupByName(drv, groupName) {
+    await drv.get(WHATSAPP_URL);
+    await ensureWhatsAppReady();
+
+    const searchBox = await findSearchBox(drv);
+    if (!searchBox) {
+        throw new Error('Could not find WhatsApp search box');
+    }
+
+    await searchBox.click();
+    await sleep(300);
+    await searchBox.sendKeys(Key.chord(Key.CONTROL, 'a'));
+    await searchBox.sendKeys(Key.BACK_SPACE);
+    await searchBox.sendKeys(groupName);
+    await sleep(2000);
+
+    const resultSelectors = [
+        `#pane-side span[title="${groupName}"]`,
+        `span[title="${groupName}"]`,
+    ];
+
+    for (const sel of resultSelectors) {
+        try {
+            const el = await drv.findElement(By.css(sel));
+            await el.click();
+            await sleep(1500);
+            return;
+        } catch (_) { /* try next */ }
+    }
+
+    try {
+        const pageText = (await drv.getPageSource()).toLowerCase();
+        if (
+            pageText.includes('no chats, contacts or messages found') ||
+            pageText.includes('لم يتم العثور على محادثات')
+        ) {
+            throw new Error(`Group not found: ${groupName}`);
+        }
+    } catch (error) {
+        if (error.message.startsWith('Group not found:')) throw error;
+    }
+
+    try {
+        const item = await drv.findElement(By.css('#pane-side div[role="listitem"]'));
+        await item.click();
+        await sleep(1500);
+        return;
+    } catch (_) {
+        throw new Error(`Group not found: ${groupName}`);
+    }
+}
+
+async function openGroupChat(drv, { groupInviteLink, groupName }) {
+    if (groupInviteLink) {
+        const url = groupWebUrlFromInviteLink(groupInviteLink);
+        if (!url) {
+            return {
+                success: false,
+                status: 'invalid_target',
+                error: 'groupInviteLink is invalid',
+            };
+        }
+        await drv.get(url);
+        await sleep(2000);
+        return {
+            success: true,
+            target: groupInviteLink,
+            chatId: url,
+        };
+    }
+
+    const normalizedName = normalizeGroupName(groupName);
+    if (!normalizedName) {
+        return {
+            success: false,
+            status: 'invalid_target',
+            error: 'groupName is invalid',
+        };
+    }
+
+    await openGroupByName(drv, normalizedName);
+    return {
+        success: true,
+        target: normalizedName,
+        chatId: `group:${normalizedName}`,
+    };
+}
+
+async function detectGroupNotAccessible(drv) {
+    try {
+        const text = (await drv.getPageSource()).toLowerCase();
+        if (
+            text.includes('invite link is invalid') ||
+            text.includes('رابط الدعوة غير صالح') ||
+            text.includes('link you followed is invalid')
+        ) {
+            return 'group_not_accessible';
+        }
+    } catch (_) {
+        /* ignore */
+    }
+    return null;
+}
+
 async function sendMessageInternal(phone, message, meta = {}) {
     const drv = await getOrCreateDriver();
     await switchToWhatsAppTab();
@@ -359,46 +585,22 @@ async function sendMessageInternal(phone, message, meta = {}) {
         };
     }
 
-    const composeSelectors = [
-        'div[contenteditable="true"][data-tab="10"]',
-        'div[contenteditable="true"][data-tab="1"]',
-        'footer div[contenteditable="true"]',
-        'div[role="textbox"][contenteditable="true"]',
-        'div[aria-placeholder][contenteditable="true"]',
-    ];
-
-    let inputBox = null;
-    const composeStart = Date.now();
-    while (!inputBox && (Date.now() - composeStart) < 60000) {
-        const midInvalid = await detectInvalidPhonePage(drv);
-        if (midInvalid === 'not_registered') {
-            console.log(`[whatsapp] not_registered phone=${maskPhone(formattedPhone)} chatId=${chatId}`);
-            return {
-                success: false,
-                status: 'not_registered',
-                error: 'Phone number is not registered on WhatsApp',
-                phone: formattedPhone,
-                chatId,
-            };
-        }
-        for (const sel of composeSelectors) {
-            try {
-                inputBox = await drv.findElement(By.css(sel));
-                console.log(`📝 Compose box found with selector: ${sel}`);
-                break;
-            } catch (_) { /* try next */ }
-        }
-        if (!inputBox) await sleep(1000);
+    const composeResult = await findComposeBox(drv, 60000, detectInvalidPhonePage);
+    if (composeResult.invalid === 'not_registered') {
+        console.log(`[whatsapp] not_registered phone=${maskPhone(formattedPhone)} chatId=${chatId}`);
+        return {
+            success: false,
+            status: 'not_registered',
+            error: 'Phone number is not registered on WhatsApp',
+            phone: formattedPhone,
+            chatId,
+        };
+    }
+    if (!composeResult.inputBox) {
+        throw new Error(composeResult.error || 'Could not find compose box within 60 seconds');
     }
 
-    if (!inputBox) {
-        throw new Error('Could not find compose box within 60 seconds');
-    }
-
-    await sleep(2000);
-    await inputBox.click();
-    await sleep(500);
-    await inputBox.sendKeys(Key.ENTER);
+    await submitComposeBox(drv, composeResult.inputBox, message, { prefillOnly: true });
 
     const messageId = makeMessageId(formattedPhone);
     console.log(
@@ -417,6 +619,319 @@ async function sendMessageInternal(phone, message, meta = {}) {
         phone: formattedPhone,
         chatId,
     };
+}
+
+async function sendGroupMessageInternal(target, message, meta = {}) {
+    const drv = await getOrCreateDriver();
+    await switchToWhatsAppTab();
+
+    const logCtx = meta.logContext || {};
+    const typePrefix = logCtx.type || 'group';
+    const targetLabel = target.groupInviteLink
+        ? `invite=${String(target.groupInviteLink).slice(0, 32)}...`
+        : `groupName=${target.groupName}`;
+
+    console.log(`[whatsapp] ${typePrefix} sending ${targetLabel}`);
+
+    const opened = await openGroupChat(drv, target);
+    if (!opened.success) {
+        return {
+            success: false,
+            status: opened.status || 'invalid_target',
+            error: opened.error || 'Invalid group target',
+            target: target.groupInviteLink || target.groupName,
+        };
+    }
+
+    await sleep(1500);
+    const inaccessible = await detectGroupNotAccessible(drv);
+    if (inaccessible === 'group_not_accessible') {
+        console.log(`[whatsapp] group_not_accessible ${targetLabel}`);
+        return {
+            success: false,
+            status: 'group_not_accessible',
+            error: 'Group invite link is invalid or the bot is not a member of this group',
+            target: opened.target,
+            chatId: opened.chatId,
+        };
+    }
+
+    const composeResult = await findComposeBox(drv, 60000, detectGroupNotAccessible);
+    if (composeResult.invalid === 'group_not_accessible') {
+        return {
+            success: false,
+            status: 'group_not_accessible',
+            error: 'Group invite link is invalid or the bot is not a member of this group',
+            target: opened.target,
+            chatId: opened.chatId,
+        };
+    }
+    if (!composeResult.inputBox) {
+        throw new Error(composeResult.error || 'Could not find compose box within 60 seconds');
+    }
+
+    await submitComposeBox(drv, composeResult.inputBox, message, { prefillOnly: false });
+
+    const messageId = makeGroupMessageId(opened.target);
+    console.log(`[whatsapp] ${typePrefix} sent ${targetLabel} messageId=${messageId}`);
+
+    const cfg = loadSettings();
+    await sleep(getDelayMs(cfg));
+    return {
+        success: true,
+        status: 'sent',
+        messageId,
+        target: opened.target,
+        chatId: opened.chatId,
+    };
+}
+
+/**
+ * Awaited group send through the serial queue (concurrency = 1).
+ */
+async function sendGroupMessageAndWait(target, message, timeout = 120000, meta = {}) {
+    const logCtx = meta.logContext || {};
+    const typePrefix = logCtx.type || 'group';
+    const targetLabel = target.groupInviteLink || target.groupName || 'unknown';
+    console.log(`[whatsapp] ${typePrefix} queued target=${targetLabel}`);
+
+    return sendQueue.enqueue(async () => {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            try {
+                const result = await sendGroupMessageInternal(target, message, meta);
+                if (result && (result.status === 'group_not_accessible' || result.status === 'invalid_target')) {
+                    return result;
+                }
+                if (result && result.success) {
+                    return result;
+                }
+                return {
+                    success: false,
+                    status: 'failed',
+                    error: (result && result.error) || 'Group send failed',
+                    target: target.groupInviteLink || target.groupName,
+                };
+            } catch (error) {
+                if (error.message && error.message.includes('QR')) {
+                    return {
+                        success: false,
+                        status: 'failed',
+                        error: 'WhatsApp Web is not ready. Please scan the QR code and try again.',
+                    };
+                }
+                if (error.message && error.message.startsWith('Group not found:')) {
+                    return {
+                        success: false,
+                        status: 'group_not_found',
+                        error: error.message,
+                        target: target.groupName,
+                    };
+                }
+                if (Date.now() - start >= timeout) {
+                    return {
+                        success: false,
+                        status: 'failed',
+                        error: error.message || 'Failed to send group message within timeout',
+                    };
+                }
+                console.log(
+                    `[whatsapp] group send retry target=${targetLabel} error=${error.message || error}`,
+                );
+                await sleep(2000);
+            }
+        }
+        return {
+            success: false,
+            status: 'failed',
+            error: 'WhatsApp Web is not ready. Please scan the QR code and try again.',
+        };
+    });
+}
+
+async function sendGroupMessage(target, message) {
+    const readyNow = await isReady();
+    if (readyNow) {
+        sendQueue
+            .enqueue(() => sendGroupMessageInternal(target, message))
+            .catch((error) => {
+                console.log(`⚠️ Group send failed for ${target.groupName || 'invite link'}:`, error.message);
+            });
+        return { success: true, message: 'Group message sending in background', status: 'queued' };
+    }
+    if (!initializationPromise) {
+        getOrCreateDriver().catch((err) => console.error('❌ Failed to initialize driver:', err.message));
+    }
+    return {
+        success: true,
+        queued: true,
+        status: 'queued',
+        message: 'WhatsApp is not ready yet; initialize the session and retry',
+    };
+}
+
+async function clickFirstMatching(drv, selectors) {
+    for (const sel of selectors) {
+        try {
+            const el = await drv.findElement(By.css(sel));
+            await el.click();
+            return true;
+        } catch (_) { /* try next */ }
+    }
+    return false;
+}
+
+async function createGroupInternal({ groupName, memberPhones = [] }) {
+    const normalizedName = normalizeGroupName(groupName);
+    if (!normalizedName) {
+        return {
+            success: false,
+            status: 'invalid_target',
+            error: 'groupName is invalid',
+        };
+    }
+
+    const drv = await getOrCreateDriver();
+    await switchToWhatsAppTab();
+    await drv.get(WHATSAPP_URL);
+    await ensureWhatsAppReady();
+
+    const openedNewChat = await clickFirstMatching(drv, [
+        '[data-icon="new-chat-outline"]',
+        'button[aria-label="New chat"]',
+        '[title="New chat"]',
+    ]);
+    if (!openedNewChat) {
+        throw new Error('Could not find the New chat button');
+    }
+    await sleep(1000);
+
+    let openedNewGroup = false;
+    const newGroupSelectors = [
+        'div[aria-label="New group"]',
+        'div[title="New group"]',
+    ];
+    for (const sel of newGroupSelectors) {
+        try {
+            await drv.findElement(By.css(sel)).click();
+            openedNewGroup = true;
+            break;
+        } catch (_) { /* try next */ }
+    }
+    if (!openedNewGroup) {
+        try {
+            const el = await drv.findElement(By.xpath("//*[contains(text(),'New group') or contains(text(),'مجموعة جديدة')]"));
+            await el.click();
+            openedNewGroup = true;
+        } catch (_) {
+            throw new Error('Could not find the New group option');
+        }
+    }
+    await sleep(2500);
+
+    const contactSearch = await findContactPickerSearch(drv);
+    if (!contactSearch) {
+        throw new Error('Could not find contact search while creating group');
+    }
+
+    for (const phone of memberPhones) {
+        const formatted = formatPhoneNumber(phone);
+        await contactSearch.click();
+        await contactSearch.sendKeys(Key.chord(Key.CONTROL, 'a'));
+        await contactSearch.sendKeys(Key.BACK_SPACE);
+        await contactSearch.sendKeys(formatted);
+        await sleep(2000);
+
+        const contactSelectors = [
+            `#pane-side span[title*="${formatted.slice(-4)}"]`,
+            '#pane-side div[role="listitem"]',
+        ];
+        let picked = false;
+        for (const sel of contactSelectors) {
+            try {
+                await drv.findElement(By.css(sel)).click();
+                picked = true;
+                break;
+            } catch (_) { /* try next */ }
+        }
+        if (!picked) {
+            throw new Error(`Could not add member with phone ${maskPhone(formatted)}`);
+        }
+        await sleep(800);
+    }
+
+    const advanced = await clickFirstMatching(drv, [
+        '[data-icon="arrow-forward"]',
+        '[data-icon="checkmark"]',
+        'div[aria-label="Next"]',
+    ]);
+    if (!advanced) {
+        throw new Error('Could not advance to group name step');
+    }
+    await sleep(1500);
+
+    const subjectSelectors = [
+        'div[contenteditable="true"][data-tab="10"]',
+        'div[contenteditable="true"][data-tab="1"]',
+        'div[role="textbox"][contenteditable="true"]',
+    ];
+    let subjectBox = null;
+    for (const sel of subjectSelectors) {
+        try {
+            subjectBox = await drv.findElement(By.css(sel));
+            break;
+        } catch (_) { /* try next */ }
+    }
+    if (!subjectBox) {
+        throw new Error('Could not find group name input');
+    }
+
+    await subjectBox.click();
+    await subjectBox.sendKeys(normalizedName);
+    await sleep(500);
+
+    const created = await clickFirstMatching(drv, [
+        '[data-icon="checkmark"]',
+        'div[aria-label="Create group"]',
+        'button[aria-label="Create group"]',
+    ]);
+    if (!created) {
+        await subjectBox.sendKeys(Key.ENTER);
+    }
+    await sleep(3000);
+
+    return {
+        success: true,
+        status: 'created',
+        groupName: normalizedName,
+        membersAdded: memberPhones.length,
+    };
+}
+
+async function createGroupAndWait(options, timeout = 120000) {
+    return sendQueue.enqueue(async () => {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            try {
+                return await createGroupInternal(options);
+            } catch (error) {
+                if (Date.now() - start >= timeout) {
+                    return {
+                        success: false,
+                        status: 'failed',
+                        error: error.message || 'Failed to create group within timeout',
+                    };
+                }
+                console.log(`[whatsapp] create group retry error=${error.message || error}`);
+                await sleep(2000);
+            }
+        }
+        return {
+            success: false,
+            status: 'failed',
+            error: 'WhatsApp Web is not ready. Please scan the QR code and try again.',
+        };
+    });
 }
 
 /**
@@ -643,6 +1158,9 @@ function formatPhoneNumber(phone) {
 module.exports = {
     sendMessage,
     sendMessageAndWait,
+    sendGroupMessage,
+    sendGroupMessageAndWait,
+    createGroupAndWait,
     initializeDriver,
     isReady,
     reinitialize,
