@@ -360,6 +360,154 @@ function getInboxTriggerStatus() {
     return window.__waInboxTrigger.status();
 }
 
+/**
+ * Observe newly added inbound message nodes in the currently open chat (#main).
+ * Captures messages even when the chat is already open (no unread badge).
+ */
+function installOpenChatMessageObserver() {
+    function resolveDirection(el, id, className) {
+        const dataId = String(id || '').trim();
+        const cls = String(className || '');
+        if (dataId.startsWith('true_')) return 'outbound';
+        if (dataId.startsWith('false_')) return 'inbound';
+        if (/\bmessage-out\b/.test(cls)) return 'outbound';
+        if (/\bmessage-in\b/.test(cls)) return 'inbound';
+        return 'unknown';
+    }
+
+    function extractMessage(el) {
+        const id = el.getAttribute('data-id') || '';
+        const className = String(el.className || '');
+        const direction = resolveDirection(el, id, className);
+        if (direction !== 'inbound') return null;
+
+        const textEl = el.querySelector(
+            'span.selectable-text.copyable-text, span.selectable-text, .copyable-text span',
+        );
+        const text = textEl ? String(textEl.innerText || '').trim() : '';
+        const prePlainHost = el.closest('[data-pre-plain-text]') || el.querySelector('[data-pre-plain-text]');
+        const prePlainText = prePlainHost
+            ? String(prePlainHost.getAttribute('data-pre-plain-text') || '').trim()
+            : '';
+        const hasMedia = Boolean(
+            el.querySelector('img, video, audio, [data-icon="audio-play"], [data-icon="status-image"]'),
+        );
+        if (!id.startsWith('false_') && !text && !hasMedia) return null;
+
+        const dedupeKey = id.startsWith('false_') ? id : `${text}\0${prePlainText}`;
+        return {
+            id: id.startsWith('false_') ? id : '',
+            className,
+            text,
+            prePlainText,
+            hasMedia,
+            direction: 'inbound',
+            dedupeKey,
+        };
+    }
+
+    function headerChatTitle() {
+        const header = document.querySelector('#main header');
+        if (!header) return '';
+        const isPresence = (value) => {
+            const normalized = String(value || '').trim();
+            if (!normalized) return true;
+            if (/^(last seen|online|typing|recording)/i.test(normalized)) return true;
+            if (/^(آخر ظهور|متصل|يكتب|جار)/i.test(normalized)) return true;
+            if (/عند\s+\d{1,2}:\d{2}/.test(normalized)) return true;
+            return false;
+        };
+        for (const el of header.querySelectorAll('span[title], div[title], span[dir="auto"]')) {
+            const value = String(el.getAttribute('title') || el.innerText || '').trim();
+            if (value && !isPresence(value)) return value;
+        }
+        return '';
+    }
+
+    if (window.__waOpenChatObserver) {
+        return window.__waOpenChatObserver.status();
+    }
+
+    const queue = [];
+    const seen = new Set();
+    let installed = false;
+    let observer = null;
+
+    function enqueueMessage(el) {
+        const message = extractMessage(el);
+        if (!message) return;
+        if (seen.has(message.dedupeKey)) return;
+        seen.add(message.dedupeKey);
+        queue.push({
+            type: 'open_chat_inbound',
+            chatTitle: headerChatTitle(),
+            message,
+            triggeredAt: new Date().toISOString(),
+        });
+    }
+
+    function scanMessageNode(node) {
+        if (!node || node.nodeType !== 1) return;
+        if (node.matches && (node.matches('div[data-id]') || node.matches('div.message-in'))) {
+            enqueueMessage(node);
+        }
+        if (node.querySelectorAll) {
+            const candidates = node.querySelectorAll('div[data-id], div.message-in');
+            for (const el of candidates) enqueueMessage(el);
+        }
+    }
+
+    function attachObserver() {
+        const main = document.querySelector('#main');
+        if (!main) return false;
+        if (observer) return true;
+        observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    scanMessageNode(node);
+                }
+            }
+        });
+        observer.observe(main, { childList: true, subtree: true });
+        installed = true;
+        return true;
+    }
+
+    window.__waOpenChatObserver = {
+        drain() {
+            return queue.splice(0, queue.length);
+        },
+        status() {
+            return { installed: true, attached: installed, queued: queue.length };
+        },
+    };
+
+    if (!attachObserver()) {
+        const waitTimer = setInterval(() => {
+            if (attachObserver()) clearInterval(waitTimer);
+        }, 500);
+    }
+
+    return window.__waOpenChatObserver.status();
+}
+
+function drainOpenChatEvents() {
+    if (!window.__waOpenChatObserver) {
+        return { events: [], status: { installed: false, queued: 0 } };
+    }
+    return {
+        events: window.__waOpenChatObserver.drain(),
+        status: window.__waOpenChatObserver.status(),
+    };
+}
+
+function getOpenChatObserverStatus() {
+    if (!window.__waOpenChatObserver) {
+        return { installed: false, queued: 0 };
+    }
+    return window.__waOpenChatObserver.status();
+}
+
 module.exports = {
     scrapeChatRows,
     clickChatRowByTitle,
@@ -367,4 +515,7 @@ module.exports = {
     installInboxTrigger,
     drainInboxEvents,
     getInboxTriggerStatus,
+    installOpenChatMessageObserver,
+    drainOpenChatEvents,
+    getOpenChatObserverStatus,
 };

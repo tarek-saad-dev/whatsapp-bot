@@ -9,6 +9,11 @@ const chrome = require('selenium-webdriver/chrome');
 const { createSendQueue } = require('./sendQueue');
 const { groupWebUrlFromInviteLink, normalizeGroupName } = require('./groupTarget');
 const { createInboxListener } = require('./inbox/inboxListener');
+const {
+    listPageTargets,
+    waitForWhatsAppPageTarget,
+    isDebugPortActive: isChromeDebugPortActive,
+} = require('./chromeDebug');
 
 // --- Fixed singleton configuration ---
 const DEBUG_PORT = Number(process.env.WHATSAPP_DEBUG_PORT) || 9222;
@@ -125,16 +130,11 @@ function resolveChromePath() {
 }
 
 function isDebugPortActive(timeoutMs = 3000) {
-    return new Promise((resolve) => {
-        const req = http.get(`http://${DEBUG_HOST}:${DEBUG_PORT}/json/version`, (res) => {
-            resolve(res.statusCode === 200);
-        });
-        req.on('error', () => resolve(false));
-        req.setTimeout(timeoutMs, () => {
-            req.destroy();
-            resolve(false);
-        });
-    });
+    return isChromeDebugPortActive(DEBUG_HOST, DEBUG_PORT, timeoutMs);
+}
+
+async function listWhatsAppPageTargets() {
+    return listPageTargets({ host: DEBUG_HOST, port: DEBUG_PORT });
 }
 
 async function waitForDebugPort(timeoutMs = 120000) {
@@ -150,7 +150,8 @@ function findBotChromePids() {
     if (process.platform !== 'win32') return [];
     try {
         const { execSync } = require('child_process');
-        const cmd = `wmic process where "name='chrome.exe' and CommandLine like '%\\\\chrome-profile-automessage\\%'" get ProcessId /format:csv`;
+        const profileMarker = path.basename(PROFILE_DIR);
+        const cmd = `wmic process where "name='chrome.exe' and CommandLine like '%${profileMarker}%'" get ProcessId /format:csv`;
         const output = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
         return output.split('\n')
             .map(line => line.trim())
@@ -286,13 +287,31 @@ async function getOrCreateDriver() {
                 console.log(`🔌 Attaching to existing Chrome on port ${DEBUG_PORT}`);
             }
 
+            const waTarget = await waitForWhatsAppPageTarget({
+                host: DEBUG_HOST,
+                port: DEBUG_PORT,
+                timeoutMs: 90000,
+                pollMs: 1000,
+            });
+            if (!waTarget) {
+                console.log('📱 No WhatsApp CDP page target yet — opening via Selenium after attach');
+            } else {
+                console.log(`✅ WhatsApp CDP page target: ${waTarget.id} (${waTarget.title})`);
+            }
+
             const options = new chrome.Options();
             options.debuggerAddress(DEBUG_ADDRESS);
 
-            driver = await new Builder()
-                .forBrowser('chrome')
-                .setChromeOptions(options)
-                .build();
+            const attachTimeoutMs = 45000;
+            driver = await Promise.race([
+                new Builder()
+                    .forBrowser('chrome')
+                    .setChromeOptions(options)
+                    .build(),
+                sleep(attachTimeoutMs).then(() => {
+                    throw new Error(`Selenium attach timed out after ${attachTimeoutMs}ms`);
+                }),
+            ]);
 
             await findOrCreateWhatsAppTab();
             const ready = await ensureWhatsAppReady();
@@ -1133,8 +1152,11 @@ function resetWhatsAppSession() {
 
 async function getStatus() {
     const chromeConnected = await isDebugPortActive(3000);
+    const cdpWhatsAppPages = chromeConnected
+        ? await listWhatsAppPageTargets()
+        : [];
     const whatsappReady = await isReady();
-    let whatsappTabFound = false;
+    let whatsappTabFound = cdpWhatsAppPages.length > 0;
     if (driver) {
         try {
             const handles = await driver.getAllWindowHandles();
@@ -1147,7 +1169,7 @@ async function getStatus() {
                 }
             }
         } catch (_) {
-            whatsappTabFound = false;
+            whatsappTabFound = cdpWhatsAppPages.length > 0;
         }
     }
     return {
@@ -1158,6 +1180,8 @@ async function getStatus() {
         profileDirectory: PROFILE_DIR,
         profileName: PROFILE_NAME,
         whatsappTabFound,
+        seleniumDriverAttached: driver !== null,
+        cdpWhatsAppPageCount: cdpWhatsAppPages.length,
         inbox: inboxListener.getStatus(),
     };
 }
@@ -1183,6 +1207,8 @@ module.exports = {
     getStatus,
     formatPhoneNumber,
     getOrCreateDriver,
+    listWhatsAppPageTargets,
+    isDebugPortActive,
     getSendQueueStats,
     resetSendQueueStats,
     enqueueSendTask,

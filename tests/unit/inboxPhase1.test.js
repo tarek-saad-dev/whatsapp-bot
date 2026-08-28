@@ -192,15 +192,20 @@ describe('Phase 1 inbox pipeline', () => {
         getTimingStats: () => ({ browserQueueWaitMs: 5, browserOperationMs: 120 }),
       };
 
+      const rowClick = vi.fn().mockResolvedValue(undefined);
       const driver = {
         executeScript: vi.fn()
           .mockResolvedValueOnce({ installed: true, trackedChats: 2 })
+          .mockResolvedValueOnce({ installed: true, queued: 0 })
+          .mockResolvedValueOnce({ events: [], status: { installed: true, queued: 0 } })
+          .mockResolvedValueOnce({ events: [], status: { installed: true, queued: 0 } })
           .mockResolvedValueOnce([{ title: 'Ahmed', ariaLabels: ['1 unread message'] }])
-          .mockResolvedValueOnce(true)
           .mockResolvedValueOnce({
             chatTitle: 'Ahmed',
+            remoteJid: '201557994946@c.us',
             messages: [{ id: 'false_201557994946@c.us_NEW', text: 'phase1', className: 'message-in' }],
           }),
+        findElement: vi.fn().mockResolvedValue({ click: rowClick }),
       };
 
       const listener = createInboxListener({
@@ -216,6 +221,7 @@ describe('Phase 1 inbox pipeline', () => {
       expect(enqueue).toHaveBeenCalledTimes(1);
       expect(captured).toHaveLength(1);
       expect(spool.getStats().pending).toBe(1);
+      expect(rowClick).toHaveBeenCalledTimes(1);
     });
   });
 });

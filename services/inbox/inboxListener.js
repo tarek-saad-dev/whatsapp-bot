@@ -5,7 +5,12 @@ const { createInboxSpool } = require('./inboxSpool');
 const { createInboxDeliveryWorker } = require('./inboxDeliveryWorker');
 const { logInbox } = require('./inboxLogger');
 const { utcNow } = require('./inboxTiming');
-const { getInboxTriggerStatus, installInboxTrigger } = require('./pageScripts');
+const {
+    getInboxTriggerStatus,
+    installInboxTrigger,
+    installOpenChatMessageObserver,
+    getOpenChatObserverStatus,
+} = require('./pageScripts');
 
 const DEFAULT_IDLE_POLL_MS = Number(
     process.env.WHATSAPP_INBOX_DRAIN_MS || process.env.WHATSAPP_INBOX_POLL_MS || 1500,
@@ -36,9 +41,12 @@ function createInboxListener({
     let pollTimer = null;
     let pollInFlight = false;
     let triggerInstalled = false;
+    let openChatObserverInstalled = false;
+    let openChatObserverAttached = false;
     let lastPollAt = null;
     let lastError = null;
     let lastCapturedCount = 0;
+    let driverInitInFlight = false;
 
     function schedulePoll(delayMs) {
         if (!listening) return;
@@ -51,24 +59,64 @@ function createInboxListener({
         if (pollTimer && typeof pollTimer.unref === 'function') pollTimer.unref();
     }
 
-    async function ensureTrigger(drv) {
-        if (triggerInstalled) return true;
-        const status = await drv.executeScript(installInboxTrigger);
-        triggerInstalled = Boolean(status && status.installed);
-        if (triggerInstalled) {
-            logInbox('trigger_installed', { trackedChats: status.trackedChats || 0 });
+    async function ensureObservers(drv) {
+        if (!drv) return false;
+
+        if (!triggerInstalled) {
+            const status = await drv.executeScript(installInboxTrigger);
+            triggerInstalled = Boolean(status && status.installed);
+            if (triggerInstalled) {
+                logInbox('trigger_installed', { trackedChats: status.trackedChats || 0 });
+            }
         }
+
+        if (!openChatObserverInstalled) {
+            const openStatus = await drv.executeScript(installOpenChatMessageObserver);
+            openChatObserverInstalled = Boolean(openStatus && openStatus.installed);
+            openChatObserverAttached = Boolean(openStatus && openStatus.attached);
+            if (openChatObserverInstalled) {
+                logInbox('open_chat_observer_installed', { attached: openChatObserverAttached });
+            }
+        } else {
+            const openStatus = await drv.executeScript(getOpenChatObserverStatus);
+            openChatObserverInstalled = Boolean(openStatus && openStatus.installed);
+            openChatObserverAttached = Boolean(openStatus && openStatus.attached);
+        }
+
         return triggerInstalled;
     }
 
+    async function ensureDriverForPoll() {
+        let drv = getDriver && getDriver();
+        if (drv) return drv;
+        if (!getOrCreateDriver || driverInitInFlight) return null;
+
+        driverInitInFlight = true;
+        try {
+            await getOrCreateDriver();
+            drv = getDriver && getDriver();
+            if (drv) {
+                if (switchToWhatsAppTab) await switchToWhatsAppTab();
+                await ensureObservers(drv);
+            }
+            return drv;
+        } catch (error) {
+            lastError = error.message || String(error);
+            logInbox('driver_init_failed', { error: lastError });
+            return null;
+        } finally {
+            driverInitInFlight = false;
+        }
+    }
+
     async function pollOnce() {
-        const drv = getDriver && getDriver();
+        const drv = await ensureDriverForPoll();
         if (!drv) return [];
 
         const ready = isReady ? await isReady() : true;
         if (!ready) return [];
 
-        await ensureTrigger(drv);
+        await ensureObservers(drv);
 
         const waDetectedAt = utcNow();
         const captureStartedAt = utcNow();
@@ -145,7 +193,11 @@ function createInboxListener({
         }
 
         const deliveryStats = spool.getStats();
-        const nextDelay = (capturedCount > 0 || deliveryStats.pending > 0)
+        const nextDelay = (
+            capturedCount > 0
+            || deliveryStats.pending > 0
+            || openChatObserverAttached
+        )
             ? activePollMs
             : idlePollMs;
         schedulePoll(nextDelay);
@@ -153,18 +205,7 @@ function createInboxListener({
     }
 
     async function initDriverInBackground() {
-        if (!getOrCreateDriver) return;
-        try {
-            await getOrCreateDriver();
-            const drv = getDriver && getDriver();
-            if (drv) {
-                if (switchToWhatsAppTab) await switchToWhatsAppTab();
-                await ensureTrigger(drv);
-            }
-        } catch (error) {
-            lastError = error.message || String(error);
-            logInbox('driver_init_failed', { error: lastError });
-        }
+        await ensureDriverForPoll();
     }
 
     function start({ initDriver = false } = {}) {
@@ -211,6 +252,8 @@ function createInboxListener({
             listening,
             mode: 'phase1.1',
             triggerInstalled,
+            openChatObserverInstalled,
+            openChatObserverAttached,
             lastPollAt: lastPollAt || adapterStatus.lastPollAt,
             lastError: lastError || adapterStatus.lastError,
             lastCapturedCount,
@@ -228,6 +271,7 @@ function createInboxListener({
     function reset() {
         spool.load();
         triggerInstalled = false;
+        openChatObserverInstalled = false;
         lastPollAt = null;
         lastError = null;
         lastCapturedCount = 0;
@@ -242,6 +286,7 @@ function createInboxListener({
         getInbox,
         getStatus,
         reset,
+        ensureDriverForPoll,
         adapter,
         spool,
         deliveryWorker: worker,
