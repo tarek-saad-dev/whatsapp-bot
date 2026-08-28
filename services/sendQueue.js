@@ -1,5 +1,7 @@
 'use strict';
 
+const { performance } = require('perf_hooks');
+
 /**
  * Serial send queue for WhatsApp Web (Selenium shares one Chrome page).
  * concurrency must stay 1 — parallel drv.get/sendKeys corrupt each other.
@@ -14,6 +16,8 @@ function createSendQueue({ concurrency = 1 } = {}) {
   let maxConcurrent = 0;
   let chain = Promise.resolve();
   let queued = 0;
+  let lastBrowserQueueWaitMs = 0;
+  let lastBrowserOperationMs = 0;
 
   /**
    * @template T
@@ -22,17 +26,20 @@ function createSendQueue({ concurrency = 1 } = {}) {
    */
   function enqueue(task) {
     queued += 1;
+    const enqueuedAt = performance.now();
     const run = chain.then(async () => {
+      lastBrowserQueueWaitMs = Math.round(performance.now() - enqueuedAt);
       queued = Math.max(0, queued - 1);
       active += 1;
       maxConcurrent = Math.max(maxConcurrent, active);
+      const operationStartedAt = performance.now();
       try {
         return await task();
       } finally {
+        lastBrowserOperationMs = Math.round(performance.now() - operationStartedAt);
         active -= 1;
       }
     });
-    // Keep the chain alive after failures so later jobs still run.
     chain = run.then(
       () => undefined,
       () => undefined,
@@ -49,11 +56,20 @@ function createSendQueue({ concurrency = 1 } = {}) {
     };
   }
 
-  function resetStats() {
-    maxConcurrent = 0;
+  function getTimingStats() {
+    return {
+      browserQueueWaitMs: lastBrowserQueueWaitMs,
+      browserOperationMs: lastBrowserOperationMs,
+    };
   }
 
-  return { enqueue, getStats, resetStats };
+  function resetStats() {
+    maxConcurrent = 0;
+    lastBrowserQueueWaitMs = 0;
+    lastBrowserOperationMs = 0;
+  }
+
+  return { enqueue, getStats, getTimingStats, resetStats };
 }
 
 module.exports = {

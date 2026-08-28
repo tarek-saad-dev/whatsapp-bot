@@ -243,4 +243,79 @@ describe('WhatsApp gateway API', () => {
       expect(res.body.error).toContain('Failed to read WhatsApp status');
     });
   });
+
+  describe('GET /api/whatsapp/inbox', () => {
+    it('returns stored incoming messages', async () => {
+      vi.spyOn(whatsappService, 'getInbox').mockReturnValue({
+        listening: true,
+        lastPollAt: '2026-08-28T06:00:00.000Z',
+        lastError: null,
+        pollIntervalMs: 5000,
+        count: 1,
+        messages: [
+          {
+            messageId: 'false_201557994946@c.us_1',
+            chatTitle: 'Ahmed',
+            phone: '201557994946',
+            text: 'عايز أطلب',
+          },
+        ],
+      });
+
+      const res = await request(app).get('/api/whatsapp/inbox');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.listening).toBe(true);
+      expect(res.body.messages).toHaveLength(1);
+      expect(res.body.messages[0].text).toBe('عايز أطلب');
+    });
+  });
+
+  describe('POST /api/whatsapp/inbox/start', () => {
+    it('starts the inbox listener', async () => {
+      vi.spyOn(whatsappService, 'startInboxListener').mockResolvedValue({
+        listening: true,
+        lastPollAt: null,
+        lastError: null,
+        pollIntervalMs: 5000,
+        count: 0,
+      });
+
+      const res = await request(app).post('/api/whatsapp/inbox/start').send({});
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.listening).toBe(true);
+      expect(whatsappService.startInboxListener).toHaveBeenCalledWith({ initDriver: true });
+    });
+
+    it('returns 500 when Chrome/WhatsApp cannot start', async () => {
+      vi.spyOn(whatsappService, 'startInboxListener').mockRejectedValue(new Error('QR required'));
+
+      const res = await request(app).post('/api/whatsapp/inbox/start').send({});
+
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Failed to start the inbox listener');
+    });
+  });
+
+  describe('POST /api/whatsapp/inbox/stop', () => {
+    it('stops the inbox listener', async () => {
+      vi.spyOn(whatsappService, 'stopInboxListener').mockReturnValue({
+        listening: false,
+        lastPollAt: null,
+        lastError: null,
+        pollIntervalMs: 5000,
+        count: 0,
+      });
+
+      const res = await request(app).post('/api/whatsapp/inbox/stop').send({});
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.listening).toBe(false);
+    });
+  });
 });

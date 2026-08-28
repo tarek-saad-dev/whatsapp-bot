@@ -3,6 +3,7 @@ require('dotenv').config();
 const { execSync } = require('child_process');
 const express = require('express');
 const whatsappRouter = require('./routes/whatsapp');
+const whatsappService = require('./services/whatsappService');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -110,6 +111,7 @@ function listen() {
             console.log(`Send:    http://localhost:${PORT}/api/whatsapp/send`);
             console.log(`Group:   http://localhost:${PORT}/api/whatsapp/send-group`);
             console.log(`Status:  http://localhost:${PORT}/api/whatsapp/status`);
+            console.log(`Inbox:   http://localhost:${PORT}/api/whatsapp/inbox`);
             console.log(`\nOn first run, scan the QR code when Chrome opens for WhatsApp Web.`);
             console.log(`Chrome requires an interactive Windows session to open.\n`);
             resolve(server);
@@ -125,6 +127,16 @@ function listen() {
 async function startServer() {
     console.log('Starting WhatsApp Messaging Gateway...');
     console.log('WhatsApp service will initialize automatically when the first message is sent.');
+
+    const inboxListen = process.env.WHATSAPP_INBOX_LISTEN === 'true';
+    if (inboxListen) {
+        console.log('Inbox listener enabled — Chrome will open so the bot can read new incoming messages.');
+        whatsappService.startInboxListener({ initDriver: true }).catch((err) => {
+            console.error('Failed to start inbox listener:', err.message);
+        });
+    } else {
+        console.log('Inbox listener is off. POST /api/whatsapp/inbox/start or set WHATSAPP_INBOX_LISTEN=true.');
+    }
 
     freePort(PORT);
 

@@ -8,6 +8,7 @@ const { Builder, By, Key } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const { createSendQueue } = require('./sendQueue');
 const { groupWebUrlFromInviteLink, normalizeGroupName } = require('./groupTarget');
+const { createInboxListener } = require('./inbox/inboxListener');
 
 // --- Fixed singleton configuration ---
 const DEBUG_PORT = Number(process.env.WHATSAPP_DEBUG_PORT) || 9222;
@@ -25,6 +26,14 @@ let chromeProcess = null;
 
 // --- Serial send queue (concurrency = 1) — shared Chrome page cannot send in parallel ---
 const sendQueue = createSendQueue({ concurrency: 1 });
+
+const inboxListener = createInboxListener({
+    getDriver: () => driver,
+    getOrCreateDriver,
+    switchToWhatsAppTab,
+    isReady,
+    sendQueue,
+});
 
 // --- Legacy queue (kept for /api/sales/* compatibility) ---
 const messageQueue = [];
@@ -1095,6 +1104,7 @@ async function closeDriver() {
 
 function cleanup() {
     console.log('🧹 Cleaning up WhatsApp service state (profile preserved)...');
+    inboxListener.stop();
     if (driver) {
         try { driver.quit().catch(() => {}); } catch (_) {}
         driver = null;
@@ -1148,6 +1158,7 @@ async function getStatus() {
         profileDirectory: PROFILE_DIR,
         profileName: PROFILE_NAME,
         whatsappTabFound,
+        inbox: inboxListener.getStatus(),
     };
 }
 
@@ -1178,4 +1189,8 @@ module.exports = {
     maskPhone,
     chatIdFromPhone,
     normalizeForWhatsApp: formatPhoneNumber,
+    startInboxListener: (opts) => inboxListener.start(opts),
+    stopInboxListener: () => inboxListener.stop(),
+    getInbox: (limit) => inboxListener.getInbox(limit),
+    pollInboxOnce: () => inboxListener.pollOnce(),
 };

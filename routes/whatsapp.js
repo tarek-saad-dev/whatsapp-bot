@@ -353,4 +353,48 @@ router.get('/status', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/whatsapp/inbox
+ * Recent incoming messages the bot has read from WhatsApp Web.
+ */
+router.get('/inbox', (req, res) => {
+    const limit = req.query.limit;
+    const inbox = whatsappService.getInbox(limit);
+    res.json({
+        success: true,
+        ...inbox,
+    });
+});
+
+/**
+ * POST /api/whatsapp/inbox/start
+ * Start watching unread chats. Opens Chrome/WhatsApp if needed.
+ */
+router.post('/inbox/start', async (req, res) => {
+    try {
+        const status = await whatsappService.startInboxListener({ initDriver: true });
+        res.json({
+            success: true,
+            ...status,
+        });
+    } catch (error) {
+        console.error('Error in POST /api/whatsapp/inbox/start:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to start the inbox listener. Scan the QR code if WhatsApp is not logged in.',
+        });
+    }
+});
+
+/**
+ * POST /api/whatsapp/inbox/stop
+ */
+router.post('/inbox/stop', (req, res) => {
+    const status = whatsappService.stopInboxListener();
+    res.json({
+        success: true,
+        ...status,
+    });
+});
+
 module.exports = router;
