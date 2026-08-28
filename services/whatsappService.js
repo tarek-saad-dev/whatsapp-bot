@@ -1189,7 +1189,7 @@ module.exports = {
     maskPhone,
     chatIdFromPhone,
     normalizeForWhatsApp: formatPhoneNumber,
-    startInboxListener: (opts) => inboxListener.start(opts),
+    startInboxListener: async (opts) => inboxListener.start(opts),
     stopInboxListener: () => inboxListener.stop(),
     getInbox: (limit) => inboxListener.getInbox(limit),
     pollInboxOnce: () => inboxListener.pollOnce(),
