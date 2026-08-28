@@ -9,6 +9,8 @@ const {
   summarizeUnreadChats,
   parseRemoteFromDataId,
   isFromMeMessage,
+  isPresenceOrStatusText,
+  pickContactTitle,
   normalizeIncomingMessage,
   ingestChatMessages,
   ingestPreviewEvents,
@@ -56,6 +58,12 @@ describe('inboxLogic', () => {
     expect(isFromMeMessage({ id: 'false_20100@c.us_1' })).toBe(false);
     expect(isFromMeMessage({ id: 'x', className: 'message-out' })).toBe(true);
     expect(isFromMeMessage({ id: 'x', className: 'message-in' })).toBe(false);
+  });
+
+  it('filters presence/last-seen header text', () => {
+    expect(isPresenceOrStatusText('آخر ظهور اليوم عند 15:40')).toBe(true);
+    expect(isPresenceOrStatusText('Karim Saad')).toBe(false);
+    expect(pickContactTitle('Karim Saad', 'آخر ظهور اليوم عند 15:40')).toBe('Karim Saad');
   });
 
   it('normalizes incoming messages and skips outgoing', () => {

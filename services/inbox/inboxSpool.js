@@ -169,6 +169,17 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
         return record;
     }
 
+    function markQuarantined(providerMessageId, { reason, errors = [] } = {}) {
+        const record = records.get(providerMessageId);
+        if (!record) return null;
+        record.status = STATUS.FAILED;
+        record.lastError = reason || errors.join(',') || 'quarantined';
+        record.quarantinedAt = utcNow();
+        record.quarantineErrors = errors;
+        persist();
+        return record;
+    }
+
     function getPendingForDelivery(now = new Date()) {
         const ts = now.getTime();
         return Array.from(records.values())
@@ -216,6 +227,7 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
         updateTiming,
         markDelivered,
         markRetry,
+        markQuarantined,
         getPendingForDelivery,
         getStats,
         listRecent,

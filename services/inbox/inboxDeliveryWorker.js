@@ -2,6 +2,7 @@
 
 const { logInbox } = require('./inboxLogger');
 const { utcNow, summarizeTimingForLog } = require('./inboxTiming');
+const { validateNormalizedEvent } = require('./normalizeMessage');
 
 const DEFAULT_BACKOFF_MS = [0, 2000, 5000, 15000, 30000, 60000, 120000, 300000];
 
@@ -87,7 +88,38 @@ function createInboxDeliveryWorker({
         });
     }
 
+    function extractErrorBody(body) {
+        if (!body || typeof body !== 'object') return { code: null, error: null };
+        return {
+            code: body.code || body.errorCode || null,
+            error: body.error || body.message || null,
+        };
+    }
+
+    function logPermanentDeliveryError(record, response, body) {
+        const { code, error } = extractErrorBody(body);
+        logInbox('permanent_delivery_error', {
+            providerMessageId: record.providerMessageId,
+            status: response.status,
+            code: code || undefined,
+            error: error || undefined,
+        });
+    }
+
     async function processRecord(record) {
+        const validation = validateNormalizedEvent(record.normalizedEvent);
+        if (!validation.valid) {
+            spool.markQuarantined(record.providerMessageId, {
+                reason: validation.errors.join(','),
+                errors: validation.errors,
+            });
+            logInbox('event_quarantined', {
+                providerMessageId: record.providerMessageId,
+                errors: validation.errors,
+            });
+            return;
+        }
+
         try {
             const { response, body } = await deliverRecord(record);
             const refreshed = spool.getRecord(record.providerMessageId) || record;
@@ -119,10 +151,7 @@ function createInboxDeliveryWorker({
                     error: `HTTP ${response.status}`,
                     permanent: true,
                 });
-                logInbox('permanent_delivery_error', {
-                    providerMessageId: record.providerMessageId,
-                    status: response.status,
-                });
+                logPermanentDeliveryError(record, response, body);
                 return;
             }
 

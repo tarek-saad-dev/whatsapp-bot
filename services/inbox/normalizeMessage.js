@@ -1,7 +1,12 @@
 'use strict';
 
 const crypto = require('crypto');
-const { phoneFromChatTitle } = require('./inboxLogic');
+const {
+    phoneFromChatTitle,
+    resolveMessageDirection,
+    isPresenceOrStatusText,
+    pickContactTitle,
+} = require('./inboxLogic');
 
 const PROVIDER = 'whatsapp-web';
 
@@ -61,7 +66,7 @@ function buildFingerprint(rawMessage, chatTitle) {
     const stableCanonical = {
         provider: PROVIDER,
         remoteJid,
-        direction: 'incoming',
+        direction: 'inbound',
         messageTimestamp,
         messageType: rawMessage.hasMedia ? 'media' : 'text',
         text: String(rawMessage.text || '').trim(),
@@ -90,18 +95,46 @@ function buildFingerprint(rawMessage, chatTitle) {
 }
 
 function resolveProviderMessageId(rawMessage, chatTitle) {
+    const direction = resolveMessageDirection(rawMessage);
+    if (direction === 'outbound') return null;
+
     const nativeId = String(rawMessage.id || '').trim();
     if (isNativeProviderMessageId(nativeId)) {
         return { providerMessageId: nativeId, idSource: ID_SOURCE.NATIVE };
     }
+    if (direction === 'unknown') return null;
     return buildFingerprint(rawMessage, chatTitle);
 }
 
-function normalizeMessage(rawMessage, chatTitle, { includeGroups = false } = {}) {
-    const parsed = parseDataId(rawMessage.id);
-    const { providerMessageId, idSource } = resolveProviderMessageId(rawMessage, chatTitle);
+function validateNormalizedEvent(event) {
+    const errors = [];
+    if (!event || typeof event !== 'object') {
+        return { valid: false, errors: ['INVALID_EVENT'] };
+    }
+    if (!event.provider) errors.push('MISSING_PROVIDER');
+    if (!event.providerMessageId) errors.push('MISSING_PROVIDER_MESSAGE_ID');
+    if (!event.receivedAt) errors.push('MISSING_RECEIVED_AT');
+    if (!event.messageType) errors.push('MISSING_MESSAGE_TYPE');
+    if (event.direction !== 'inbound') errors.push('NOT_INBOUND');
+    if (!event.isGroup && !event.phone) errors.push('MISSING_PHONE');
+    if (isPresenceOrStatusText(event.chatTitle)) errors.push('INVALID_CHAT_TITLE');
+    return { valid: errors.length === 0, errors };
+}
 
-    const remoteJid = inferRemoteJid(rawMessage, chatTitle, parsed) || '';
+function normalizeMessage(rawMessage, chatTitle, { includeGroups = false, remoteJid: contextRemoteJid = null } = {}) {
+    const direction = resolveMessageDirection(rawMessage);
+    if (direction === 'outbound') return null;
+    if (direction === 'unknown') return null;
+
+    const parsed = parseDataId(rawMessage.id);
+    const resolved = resolveProviderMessageId(rawMessage, chatTitle);
+    if (!resolved) return null;
+    const { providerMessageId, idSource } = resolved;
+
+    const remoteJid = (parsed && parsed.remoteJid)
+        || contextRemoteJid
+        || inferRemoteJid(rawMessage, chatTitle, parsed)
+        || '';
     const isGroup = remoteJid.endsWith('@g.us');
     if (isGroup && !includeGroups) return null;
 
@@ -115,13 +148,16 @@ function normalizeMessage(rawMessage, chatTitle, { includeGroups = false } = {})
     if (!text && messageType !== 'media') return null;
 
     const messageTimestamp = extractMessageTimestamp(rawMessage.prePlainText);
+    const resolvedTitle = pickContactTitle(chatTitle, phone);
 
-    return {
+    const event = {
         provider: PROVIDER,
         providerMessageId,
         idSource,
+        direction: 'inbound',
+        remoteJid: remoteJid || null,
         phone: phone || null,
-        chatTitle: String(chatTitle || '').trim(),
+        chatTitle: resolvedTitle || phone || '',
         messageType,
         text: text || '[media]',
         isGroup,
@@ -133,8 +169,14 @@ function normalizeMessage(rawMessage, chatTitle, { includeGroups = false } = {})
             messageTimestamp,
             hasMedia: Boolean(rawMessage.hasMedia),
             waMessageKey: parsed && parsed.messageKey ? parsed.messageKey : null,
+            direction: 'inbound',
         },
     };
+
+    const validation = validateNormalizedEvent(event);
+    if (!validation.valid) return null;
+
+    return event;
 }
 
 module.exports = {
@@ -145,5 +187,6 @@ module.exports = {
     extractMessageTimestamp,
     buildFingerprint,
     resolveProviderMessageId,
+    validateNormalizedEvent,
     normalizeMessage,
 };

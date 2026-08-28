@@ -1,6 +1,11 @@
 'use strict';
 
-const { summarizeUnreadChats } = require('./inboxLogic');
+const {
+    summarizeUnreadChats,
+    isFromMeMessage,
+    resolveMessageDirection,
+    pickContactTitle,
+} = require('./inboxLogic');
 const { normalizeMessage, ID_SOURCE } = require('./normalizeMessage');
 const { logInbox } = require('./inboxLogger');
 const { utcNow, isoBetween } = require('./inboxTiming');
@@ -12,6 +17,16 @@ const {
 } = require('./pageScripts');
 
 const DEFAULT_MAX_CHATS = Number(process.env.WHATSAPP_INBOX_MAX_CHATS_PER_POLL || 5);
+
+function selectIncomingMessages(messages, unreadCount) {
+    const inbound = (messages || []).filter((message) => {
+        if (isFromMeMessage(message)) return false;
+        return resolveMessageDirection(message) === 'inbound';
+    });
+    if (inbound.length === 0) return [];
+    const limit = Math.max(Number(unreadCount) || 0, 1);
+    return inbound.slice(-limit);
+}
 
 function createWhatsAppInboxAdapter({
     getDriver,
@@ -65,15 +80,21 @@ function createWhatsAppInboxAdapter({
             if (sleep) await sleep(900);
 
             const opened = await drv.executeScript(scrapeOpenConversation);
-            const chatTitle = (opened && opened.chatTitle) || chat.title;
-            const messages = (opened && opened.messages) || [];
+            const chatTitle = pickContactTitle(chat.title, opened && opened.chatTitle);
+            const remoteJid = (opened && opened.remoteJid) || null;
+            const messages = selectIncomingMessages(
+                (opened && opened.messages) || [],
+                chat.unreadCount,
+            );
 
             for (const rawMessage of messages) {
-                const fromMe = String(rawMessage.id || '').startsWith('true_')
-                    || /\bmessage-out\b/.test(String(rawMessage.className || ''));
-                if (fromMe) continue;
+                if (isFromMeMessage(rawMessage)) continue;
+                if (resolveMessageDirection(rawMessage) !== 'inbound') continue;
 
-                const normalized = normalizeMessage(rawMessage, chatTitle, { includeGroups });
+                const normalized = normalizeMessage(rawMessage, chatTitle, {
+                    includeGroups,
+                    remoteJid,
+                });
                 if (!normalized) continue;
                 if (hasProviderMessageId(normalized.providerMessageId)) continue;
 
@@ -89,6 +110,7 @@ function createWhatsAppInboxAdapter({
                 logInbox('message_captured', {
                     providerMessageId: normalized.providerMessageId,
                     idSource: normalized.idSource,
+                    direction: normalized.direction,
                     chatTitle: normalized.chatTitle,
                     phone: normalized.phone || undefined,
                     text: normalized.text,
@@ -129,6 +151,7 @@ function createWhatsAppInboxAdapter({
         poll,
         extractUnreadMessages,
         normalizeMessage,
+        selectIncomingMessages,
         getHealth,
         setBrowserTiming({ browserQueueWaitMs = 0, browserOperationMs = 0 } = {}) {
             lastBrowserQueueWaitMs = browserQueueWaitMs;
@@ -150,4 +173,5 @@ function createWhatsAppInboxAdapter({
 
 module.exports = {
     createWhatsAppInboxAdapter,
+    selectIncomingMessages,
 };

@@ -55,7 +55,40 @@ function isFromMeMessage(message) {
     const className = String(message && message.className ? message.className : '');
     if (id.startsWith('true_') || /\bmessage-out\b/.test(className)) return true;
     if (id.startsWith('false_') || /\bmessage-in\b/.test(className)) return false;
+    if (message && message.direction === 'outbound') return true;
+    if (message && message.direction === 'inbound') return false;
     return Boolean(message && message.fromMe);
+}
+
+function resolveMessageDirection(message) {
+    const id = String(message && message.id ? message.id : '').trim();
+    const className = String(message && message.className ? message.className : '');
+    if (id.startsWith('true_')) return 'outbound';
+    if (id.startsWith('false_')) return 'inbound';
+    if (/\bmessage-out\b/.test(className)) return 'outbound';
+    if (/\bmessage-in\b/.test(className)) return 'inbound';
+    if (message && message.direction === 'outbound') return 'outbound';
+    if (message && message.direction === 'inbound') return 'inbound';
+    return 'unknown';
+}
+
+function isPresenceOrStatusText(text) {
+    const normalized = String(text || '').trim();
+    if (!normalized) return true;
+    if (/^(last seen|online|typing|recording)/i.test(normalized)) return true;
+    if (/^(آخر ظهور|متصل|يكتب|جار)/i.test(normalized)) return true;
+    if (/عند\s+\d{1,2}:\d{2}/.test(normalized)) return true;
+    if (/^\d{1,2}:\d{2}(\s|$)/.test(normalized)) return true;
+    if (/^(last seen today|online today)/i.test(normalized)) return true;
+    return false;
+}
+
+function pickContactTitle(...candidates) {
+    for (const candidate of candidates) {
+        const title = String(candidate || '').trim();
+        if (title && !isPresenceOrStatusText(title)) return title;
+    }
+    return '';
 }
 
 function normalizeIncomingMessage(message, chatTitle) {
@@ -245,6 +278,9 @@ module.exports = {
     summarizeUnreadChats,
     parseRemoteFromDataId,
     isFromMeMessage,
+    resolveMessageDirection,
+    isPresenceOrStatusText,
+    pickContactTitle,
     normalizeIncomingMessage,
     ingestChatMessages,
     phoneFromChatTitle,

@@ -32,12 +32,50 @@ function clickChatRowByTitle(title) {
 }
 
 function scrapeOpenConversation() {
-    const header = document.querySelector('#main header span[title]');
-    const chatTitle = header ? header.getAttribute('title') : '';
+    function isPresenceText(text) {
+        const normalized = String(text || '').trim();
+        if (!normalized) return true;
+        if (/^(last seen|online|typing|recording)/i.test(normalized)) return true;
+        if (/^(آخر ظهور|متصل|يكتب|جار)/i.test(normalized)) return true;
+        if (/عند\s+\d{1,2}:\d{2}/.test(normalized)) return true;
+        if (/^\d{1,2}:\d{2}(\s|$)/.test(normalized)) return true;
+        return false;
+    }
+
+    function resolveDirection(el, id, className) {
+        const dataId = String(id || '').trim();
+        const cls = String(className || '');
+        if (dataId.startsWith('true_')) return 'outbound';
+        if (dataId.startsWith('false_')) return 'inbound';
+        if (/\bmessage-out\b/.test(cls)) return 'outbound';
+        if (/\bmessage-in\b/.test(cls)) return 'inbound';
+        const aria = String(el.getAttribute('aria-label') || '');
+        if (/you sent|sent by you|أرسلت/i.test(aria)) return 'outbound';
+        return 'unknown';
+    }
+
+    function remoteJidFromDataId(dataId) {
+        const raw = String(dataId || '').replace(/^(true|false)_/, '');
+        const remote = raw.split('_')[0] || '';
+        return remote.includes('@') ? remote : '';
+    }
+
+    const header = document.querySelector('#main header');
+    const headerCandidates = [];
+    if (header) {
+        for (const el of header.querySelectorAll('span[title], div[title]')) {
+            const title = String(el.getAttribute('title') || '').trim();
+            if (title && !isPresenceText(title)) headerCandidates.push(title);
+        }
+        for (const el of header.querySelectorAll('span[dir="auto"]')) {
+            const text = String(el.innerText || '').trim();
+            if (text && !isPresenceText(text) && text.length < 120) headerCandidates.push(text);
+        }
+    }
+    const chatTitle = headerCandidates[0] || '';
 
     const selectorList = [
         '#main div[data-id]',
-        '#main [data-id]',
         '#main div.message-in',
         '#main div.message-out',
     ];
@@ -48,10 +86,23 @@ function scrapeOpenConversation() {
     }
 
     const messages = [];
+    const remoteJids = new Map();
     for (let index = 0; index < nodes.length; index += 1) {
         const el = nodes[index];
         const id = el.getAttribute('data-id') || '';
         const className = String(el.className || '');
+        const direction = resolveDirection(el, id, className);
+        if (direction === 'outbound') continue;
+        if (direction === 'unknown' && !/\bmessage-in\b/.test(className) && !id.startsWith('false_')) {
+            continue;
+        }
+
+        const inboundId = id.startsWith('false_') ? id : '';
+        if (inboundId) {
+            const jid = remoteJidFromDataId(inboundId);
+            if (jid) remoteJids.set(jid, (remoteJids.get(jid) || 0) + 1);
+        }
+
         const textEl = el.querySelector(
             'span.selectable-text.copyable-text, span.selectable-text, .copyable-text span',
         );
@@ -63,17 +114,28 @@ function scrapeOpenConversation() {
         const hasMedia = Boolean(
             el.querySelector('img, video, audio, [data-icon="audio-play"], [data-icon="status-image"]'),
         );
-        if (!id && !text && !hasMedia) continue;
+        if (!inboundId && !text && !hasMedia) continue;
         messages.push({
-            id,
+            id: inboundId || id,
             className,
             text,
             prePlainText,
             hasMedia,
             domIndex: index,
+            direction: direction === 'unknown' ? 'inbound' : direction,
         });
     }
-    return { chatTitle, messages };
+
+    let remoteJid = '';
+    let bestCount = 0;
+    for (const [jid, count] of remoteJids.entries()) {
+        if (count > bestCount) {
+            bestCount = count;
+            remoteJid = jid;
+        }
+    }
+
+    return { chatTitle, remoteJid, messages };
 }
 
 /**

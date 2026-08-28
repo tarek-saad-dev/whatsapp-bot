@@ -20,6 +20,7 @@ describe('Phase 1.1 hardening', () => {
       const result = resolveProviderMessageId({
         id: '',
         text: 'تمام',
+        className: 'message-in',
         prePlainText: '[10:30 AM, 8/28/2026] Ahmed: تمام',
       }, 'Ahmed');
       expect(result.idSource).toBe(ID_SOURCE.FINGERPRINT_STABLE);
@@ -30,6 +31,7 @@ describe('Phase 1.1 hardening', () => {
       const result = resolveProviderMessageId({
         id: '',
         text: 'تمام',
+        className: 'message-in',
         domIndex: 3,
       }, 'Ahmed');
       expect(result.idSource).toBe(ID_SOURCE.FINGERPRINT_DEGRADED);
@@ -39,6 +41,7 @@ describe('Phase 1.1 hardening', () => {
       const raw = {
         id: '',
         text: 'hello',
+        className: 'message-in',
         prePlainText: '[10:31 AM, 8/28/2026] Ahmed: hello',
       };
       const first = resolveProviderMessageId(raw, 'Ahmed');

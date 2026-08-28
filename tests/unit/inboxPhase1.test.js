@@ -38,7 +38,9 @@ describe('Phase 1 inbox pipeline', () => {
         provider: 'whatsapp-web',
         providerMessageId: 'false_201557994946@c.us_3EB0ABC',
         idSource: 'native',
+        direction: 'inbound',
         phone: '201557994946',
+        remoteJid: '201557994946@c.us',
         chatTitle: 'Ahmed',
         messageType: 'text',
         text: 'عايز احجز بكرة',
@@ -115,6 +117,53 @@ describe('Phase 1 inbox pipeline', () => {
       const worker = createInboxDeliveryWorker({ spool, webhookUrl: 'http://cashier.test/inbox', fetchImpl });
       await worker.processRecord(spool.getPendingForDelivery()[0]);
       expect(spool.getStats().delivered).toBe(1);
+    });
+
+    it('marks invalid pending events as quarantined without calling webhook', async () => {
+      const spool = createInboxSpool({ spoolFile: path.join(tempDir, 'spool-q.json') });
+      spool.capture({
+        provider: 'whatsapp-web',
+        providerMessageId: 'bad-event-1',
+        idSource: 'fingerprint_degraded',
+        direction: 'inbound',
+        phone: null,
+        chatTitle: 'آخر ظهور اليوم عند 15:40',
+        messageType: 'text',
+        text: 'bad',
+        isGroup: false,
+        receivedAt: new Date().toISOString(),
+        rawPayload: {},
+      });
+
+      const fetchImpl = vi.fn();
+      const worker = createInboxDeliveryWorker({
+        spool,
+        webhookUrl: 'http://cashier.test/inbox',
+        fetchImpl,
+      });
+
+      await worker.processRecord(spool.getPendingForDelivery()[0]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(spool.getStats().failedOrRetrying).toBe(1);
+      expect(spool.getStats().pending).toBe(0);
+    });
+
+    it('logs Cashier 400 code and message on permanent delivery error', async () => {
+      const spool = createInboxSpool({ spoolFile: path.join(tempDir, 'spool-d.json') });
+      spool.capture(normalizeMessage({ id: 'false_20100@c.us_DDD', text: 'hello' }, 'Ahmed'));
+
+      const fetchImpl = vi.fn().mockResolvedValue({
+        status: 400,
+        json: async () => ({ ok: false, code: 'MISSING_PHONE', error: 'phone is required' }),
+      });
+      const worker = createInboxDeliveryWorker({
+        spool,
+        webhookUrl: 'http://cashier.test/inbox',
+        fetchImpl,
+      });
+
+      await worker.processRecord(spool.getPendingForDelivery()[0]);
+      expect(spool.getStats().failedOrRetrying).toBe(1);
     });
 
     it('keeps pending and schedules retry on network failure', async () => {
