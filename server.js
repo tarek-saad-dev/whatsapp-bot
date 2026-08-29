@@ -7,7 +7,10 @@ const whatsappService = require('./services/whatsappService');
 const { isBaileysTransport } = require('./services/transport/config');
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+
+function getPort() {
+    return Number(process.env.PORT || 3000);
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -105,6 +108,7 @@ function freePort(port) {
 }
 
 function listen() {
+    const PORT = getPort();
     return new Promise((resolve, reject) => {
         const server = app.listen(PORT, () => {
             console.log(`WhatsApp Messaging Gateway running on http://localhost:${PORT}`);
@@ -150,14 +154,14 @@ async function startServer() {
         console.log('Inbox listener is off. POST /api/whatsapp/inbox/start or set WHATSAPP_INBOX_LISTEN=true.');
     }
 
-    freePort(PORT);
+    freePort(getPort());
 
     try {
         return await listen();
     } catch (err) {
         if (err.code === 'EADDRINUSE') {
-            console.warn(`Port ${PORT} still in use. Retrying cleanup...`);
-            freePort(PORT);
+            console.warn(`Port ${getPort()} still in use. Retrying cleanup...`);
+            freePort(getPort());
             return await listen();
         }
 

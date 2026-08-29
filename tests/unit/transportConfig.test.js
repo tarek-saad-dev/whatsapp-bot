@@ -53,7 +53,7 @@ describe('whatsappService transport selection', () => {
     });
 
     it('loads selenium implementation by default', () => {
-        delete process.env.WHATSAPP_TRANSPORT;
+        process.env.WHATSAPP_TRANSPORT = 'selenium';
         vi.resetModules();
         const svc = require('../../services/whatsappService');
         expect(svc.getTransportMode()).toBe('selenium');

@@ -137,11 +137,17 @@ async function startInboxListener({ initDriver = false } = {}) {
     if (initDriver === false || initDriver === true) {
         // Baileys never uses Chrome — initDriver is ignored.
     }
-    return transport.start();
+    await transport.start();
+    return transport.getInboxStatus();
 }
 
 function stopInboxListener() {
-    return transport.stop();
+    // Fire-and-forget stop; return inbox-shaped status immediately for HTTP contract.
+    transport.stop().catch(() => {});
+    return {
+        ...transport.getInboxStatus(),
+        listening: false,
+    };
 }
 
 function getInbox(limit) {

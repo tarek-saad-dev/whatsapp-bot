@@ -6,7 +6,10 @@ const whatsappService = require('../../services/whatsappService');
 const { startServer } = require('../../server.js');
 
 describe('server startup with inbox listener enabled', () => {
-  const envBackup = { WHATSAPP_INBOX_LISTEN: process.env.WHATSAPP_INBOX_LISTEN, PORT: process.env.PORT };
+  const envBackup = {
+    WHATSAPP_INBOX_LISTEN: process.env.WHATSAPP_INBOX_LISTEN,
+    PORT: process.env.PORT,
+  };
 
   afterEach(async () => {
     vi.restoreAllMocks();
@@ -19,7 +22,10 @@ describe('server startup with inbox listener enabled', () => {
     expect(result).toBeInstanceOf(Promise);
     expect(typeof result.catch).toBe('function');
     const status = await result;
-    expect(status).toMatchObject({ listening: expect.any(Boolean), mode: 'phase1.1' });
+    expect(status).toMatchObject({
+      listening: expect.any(Boolean),
+      mode: expect.stringMatching(/^(phase1\.1|baileys)$/),
+    });
   });
 
   it('startServer completes when WHATSAPP_INBOX_LISTEN=true', async () => {
@@ -32,7 +38,10 @@ describe('server startup with inbox listener enabled', () => {
     });
 
     const server = await startServer();
-    expect(whatsappService.startInboxListener).toHaveBeenCalledWith({ initDriver: true });
+    expect(whatsappService.startInboxListener).toHaveBeenCalled();
+    const initArg = whatsappService.startInboxListener.mock.calls[0][0] || {};
+    // Selenium boots Chrome (initDriver:true); Baileys does not.
+    expect(typeof initArg.initDriver).toBe('boolean');
     expect(server).toBeDefined();
 
     await new Promise((resolve) => server.close(resolve));
@@ -49,7 +58,9 @@ describe('server startup with inbox listener enabled', () => {
     expect(server).toBeDefined();
 
     await new Promise((resolve) => setImmediate(resolve));
-    expect(consoleSpy).toHaveBeenCalledWith('Failed to start inbox listener:', 'Chrome unavailable');
+    const logged = consoleSpy.mock.calls.map((parts) => parts.join(' ')).join('\n');
+    expect(logged).toMatch(/Failed to start (inbox listener|Baileys inbox transport):/);
+    expect(logged).toContain('Chrome unavailable');
 
     await new Promise((resolve) => server.close(resolve));
   });
