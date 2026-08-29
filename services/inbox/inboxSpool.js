@@ -30,6 +30,35 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
         }
     }
 
+    function isHistoricalPermanentFailure(record) {
+        if (!record || record.status !== STATUS.FAILED) return false;
+        if (record.quarantinedAt) return false;
+        const pid = String(record.providerMessageId || '');
+        const err = String(record.lastError || '');
+        // Legacy Selenium fingerprint IDs and permanent Cashier 4xx failures must
+        // stay auditable but never re-enter the delivery queue.
+        if (pid.startsWith('fp-')) return true;
+        if (/^HTTP 4\d\d\b/.test(err)) return true;
+        return false;
+    }
+
+    function archiveHistoricalFailures() {
+        let changed = false;
+        let archived = 0;
+        for (const record of records.values()) {
+            if (!isHistoricalPermanentFailure(record)) continue;
+            const pid = String(record.providerMessageId || '');
+            record.quarantinedAt = record.quarantinedAt || utcNow();
+            record.archiveReason = pid.startsWith('fp-')
+                ? 'legacy_selenium_fingerprint'
+                : 'permanent_http_failure';
+            archived += 1;
+            changed = true;
+        }
+        if (changed) persist();
+        return archived;
+    }
+
     function load() {
         ensureDir();
         if (!fs.existsSync(spoolFile)) {
@@ -44,6 +73,7 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
                     records.set(item.providerMessageId, item);
                 }
             }
+            archiveHistoricalFailures();
         } catch (error) {
             throw new Error(`Failed to load inbox spool: ${error.message}`);
         }
@@ -191,13 +221,26 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
     function getStats() {
         let pending = 0;
         let delivered = 0;
-        let failedOrRetrying = 0;
+        let failed = 0;
+        let quarantined = 0;
         for (const record of records.values()) {
-            if (record.status === STATUS.DELIVERED) delivered += 1;
-            else if (record.status === STATUS.FAILED) failedOrRetrying += 1;
-            else pending += 1;
+            if (record.status === STATUS.DELIVERED) {
+                delivered += 1;
+            } else if (record.status === STATUS.FAILED) {
+                if (record.quarantinedAt) quarantined += 1;
+                else failed += 1;
+            } else {
+                pending += 1;
+            }
         }
-        return { pending, delivered, failedOrRetrying };
+        return {
+            pending,
+            delivered,
+            failed,
+            quarantined,
+            // Back-compat: terminal non-delivered rows (never pending/retrying).
+            failedOrRetrying: failed + quarantined,
+        };
     }
 
     function listRecent(limit = 50) {
@@ -231,6 +274,8 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
         getPendingForDelivery,
         getStats,
         listRecent,
+        archiveHistoricalFailures,
+        isHistoricalPermanentFailure,
     };
 }
 

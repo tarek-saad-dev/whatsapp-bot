@@ -71,11 +71,17 @@ function createBaileysTransport({
     let messageReceiptListeners = 0;
     let authLoaded = false;
     let getMessageStoreInitialized = true;
+    let lastOutboundAt = null;
+    let lastOutboundAckAt = null;
+    let lastOutboundProviderMessageId = null;
+    let lastOutboundRoute = null;
+    let lastOutboundRemoteJid = null;
     const seenKeys = new Set();
     const lidStore = createLidMappingStore({ mapFile: lidMapFile });
     const lidCache = createLidPhoneCache(lidStore);
 
     function getDiagnostics() {
+        const storeStats = messageStore.getStats();
         return {
             connectGeneration,
             messagesUpsertListeners,
@@ -89,8 +95,14 @@ function createBaileysTransport({
             authDir,
             authLoaded,
             getMessageStoreInitialized,
-            outboundMessageStore: messageStore.getStats(),
+            getMessageStoreSize: storeStats.size,
+            outboundMessageStore: storeStats,
             signalSessionChurn: getSessionChurnStats(),
+            lastOutboundAt,
+            lastOutboundAckAt,
+            lastOutboundProviderMessageId,
+            lastOutboundRoute,
+            lastOutboundRemoteJid,
         };
     }
 
@@ -169,11 +181,17 @@ function createBaileysTransport({
             const key = item && item.key;
             if (!key || !key.fromMe) continue; // outbound only — never inbound enqueue
             const update = item.update || {};
+            const at = utcNow();
+            if (update.status != null) {
+                lastOutboundAckAt = at;
+                if (key.id) lastOutboundProviderMessageId = key.id;
+                if (key.remoteJid) lastOutboundRemoteJid = key.remoteJid;
+            }
             logInbox('baileys_outbound_update', {
                 providerMessageId: key.id || null,
                 remoteJid: key.remoteJid || null,
                 status: update.status != null ? update.status : null,
-                at: utcNow(),
+                at,
             });
         }
     }
@@ -463,6 +481,10 @@ function createBaileysTransport({
             if (messageId) {
                 messageStore.put(resultKey, storedContent);
             }
+            lastOutboundAt = utcNow();
+            lastOutboundProviderMessageId = messageId;
+            lastOutboundRoute = destination.route;
+            lastOutboundRemoteJid = jid;
             logger.info('[baileys] send_end', {
                 phone: destination.phone,
                 remoteJid: jid,

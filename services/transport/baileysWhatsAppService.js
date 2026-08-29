@@ -130,7 +130,10 @@ async function isReady() {
 }
 
 async function getStatus() {
-    return transport.getStatus();
+    const status = await transport.getStatus();
+    const { shouldUseMemoryStore } = require('../idempotency/deliveryStore');
+    status.idempotencyStore = shouldUseMemoryStore() ? 'memory' : 'sql';
+    return status;
 }
 
 async function startInboxListener({ initDriver = false } = {}) {

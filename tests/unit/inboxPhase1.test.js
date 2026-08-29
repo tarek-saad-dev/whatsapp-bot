@@ -179,6 +179,56 @@ describe('Phase 1 inbox pipeline', () => {
       expect(spool.getPendingForDelivery()).toHaveLength(0);
       expect(spool.getStats().pending).toBe(1);
     });
+
+    it('archives legacy Selenium fingerprint failures on load and never retries them', () => {
+      const spoolFile = path.join(tempDir, 'spool-archive.json');
+      const bad = {
+        providerMessageId: 'fp-deadbeefcafebabe0123456789abcdef',
+        status: 'failed',
+        normalizedEvent: {
+          provider: 'whatsapp-web',
+          providerMessageId: 'fp-deadbeefcafebabe0123456789abcdef',
+          phone: null,
+          text: 'تم تسجيل فاتورة جديدة لك',
+        },
+        attempts: 1,
+        lastError: 'HTTP 400',
+        nextRetryAt: new Date().toISOString(),
+        capturedAt: '2026-08-28T13:02:48.000Z',
+        deliveredAt: null,
+      };
+      fs.writeFileSync(spoolFile, JSON.stringify({ version: 1, records: [bad] }, null, 2));
+
+      const reloaded = createInboxSpool({ spoolFile });
+      const record = reloaded.getRecord(bad.providerMessageId);
+      expect(record.status).toBe('failed');
+      expect(record.quarantinedAt).toBeTruthy();
+      expect(record.archiveReason).toBe('legacy_selenium_fingerprint');
+      expect(reloaded.getPendingForDelivery()).toHaveLength(0);
+      const stats = reloaded.getStats();
+      expect(stats.pending).toBe(0);
+      expect(stats.quarantined).toBe(1);
+      expect(stats.failed).toBe(0);
+      expect(stats.failedOrRetrying).toBe(1);
+    });
+
+    it('keeps permanent HTTP failures out of pending after markRetry(permanent)', async () => {
+      const spool = createInboxSpool({ spoolFile: path.join(tempDir, 'spool-perm.json') });
+      spool.capture(normalizeMessage({ id: 'false_20100@c.us_PERM1', text: 'hello' }, 'Ahmed'));
+      const fetchImpl = vi.fn().mockResolvedValue({
+        status: 400,
+        json: async () => ({ ok: false, code: 'MISSING_PHONE', error: 'phone is required' }),
+      });
+      const worker = createInboxDeliveryWorker({
+        spool,
+        webhookUrl: 'http://cashier.test/inbox',
+        fetchImpl,
+      });
+      await worker.processRecord(spool.getPendingForDelivery()[0]);
+      expect(spool.getPendingForDelivery()).toHaveLength(0);
+      expect(spool.getStats().pending).toBe(0);
+      expect(spool.getStats().failedOrRetrying).toBe(1);
+    });
   });
 
   describe('listener uses sendQueue for adapter poll', () => {
