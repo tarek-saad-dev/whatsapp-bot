@@ -79,6 +79,17 @@ function createLidMappingStore({ mapFile = DEFAULT_MAP_FILE } = {}) {
         return entry ? entry.phone : null;
     }
 
+    function resolveLidByPhone(phone) {
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (!digits) return null;
+        for (const [lid, entry] of records.entries()) {
+            if (entry && String(entry.phone || '') === digits && String(lid).endsWith('@lid')) {
+                return lid;
+            }
+        }
+        return null;
+    }
+
     function list() {
         return Array.from(records.entries()).map(([lid, entry]) => ({ lid, ...entry }));
     }
@@ -96,6 +107,7 @@ function createLidMappingStore({ mapFile = DEFAULT_MAP_FILE } = {}) {
         remember,
         resolvePn,
         resolvePhone,
+        resolveLidByPhone,
         list,
         size,
     };

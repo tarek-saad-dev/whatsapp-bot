@@ -69,6 +69,19 @@ function createLidPhoneCache(store = null) {
         return memory.get(lid) || null;
     }
 
+    function resolveLidByPhone(phone) {
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (!digits) return null;
+        if (lidToPn && typeof lidToPn.resolveLidByPhone === 'function') {
+            return lidToPn.resolveLidByPhone(digits);
+        }
+        for (const [lid, pnJid] of memory.entries()) {
+            const pnDigits = String(pnJid || '').split('@')[0].replace(/\D/g, '');
+            if (pnDigits === digits && String(lid).endsWith('@lid')) return lid;
+        }
+        return null;
+    }
+
     function size() {
         if (lidToPn) return lidToPn.size();
         return memory.size;
@@ -84,6 +97,7 @@ function createLidPhoneCache(store = null) {
         rememberContact,
         rememberChat,
         resolvePn,
+        resolveLidByPhone,
         size,
         list,
     };

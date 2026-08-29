@@ -198,9 +198,13 @@ describe('baileysTransport reconnect safety', () => {
 
         await transport.start();
         expect(transport.getDiagnostics().messagesUpsertListeners).toBe(1);
+        expect(transport.getDiagnostics().messagesUpdateListeners).toBe(1);
+        expect(transport.getDiagnostics().messageReceiptListeners).toBe(1);
+        expect(transport.getDiagnostics().getMessageStoreInitialized).toBe(true);
 
         await transport.connect();
         expect(transport.getDiagnostics().messagesUpsertListeners).toBe(2);
+        expect(transport.getDiagnostics().messagesUpdateListeners).toBe(2);
         expect(sockets).toHaveLength(2);
 
         const liveSocket = sockets[sockets.length - 1];
@@ -211,6 +215,98 @@ describe('baileysTransport reconnect safety', () => {
         await new Promise((r) => setImmediate(r));
 
         expect(transport.spool.listRecent(10)).toHaveLength(1);
+        await transport.stop();
+    });
+
+    it('stores outbound for getMessage, routes LID, and ignores update/fromMe inbound', async () => {
+        class FakeSocket {
+            constructor() {
+                this.ev = new EventEmitter();
+                this.end = async () => {};
+            }
+
+            async sendMessage(jid, content) {
+                return {
+                    key: {
+                        remoteJid: jid,
+                        fromMe: true,
+                        id: '3EB0OUTBOUND1',
+                    },
+                    message: { conversation: content.text },
+                };
+            }
+        }
+
+        let socketConfig = null;
+        const socket = new FakeSocket();
+        const spoolFile = path.join(os.tmpdir(), `baileys-spool-send-${Date.now()}.json`);
+        const lidMapFile = path.join(os.tmpdir(), `baileys-lid-${Date.now()}.json`);
+        const transport = createBaileysTransport({
+            authDir: path.join(os.tmpdir(), `baileys-auth-send-${Date.now()}`),
+            lidMapFile,
+            spool: createInboxSpool({ spoolFile }),
+            logger: { info() {}, warn() {}, error() {} },
+            makeSocket: (cfg) => {
+                socketConfig = cfg;
+                process.nextTick(() => socket.ev.emit('connection.update', { connection: 'open' }));
+                return socket;
+            },
+            useAuthState: async () => ({
+                state: { creds: {} },
+                saveCreds: async () => {},
+            }),
+            fetchVersion: async () => ({ version: [2, 3000, 0] }),
+        });
+
+        await transport.start();
+        await new Promise((r) => setImmediate(r));
+        expect(transport.isReady()).toBe(true);
+
+        transport.lidCache.rememberPn(
+            '92449473073158@lid',
+            '201557994946@s.whatsapp.net',
+            'test',
+        );
+
+        const resolved = transport.resolveOutboundJid('201557994946');
+        expect(resolved.jid).toBe('92449473073158@lid');
+
+        const sent = await transport.send('201557994946', 'retryable hello');
+        expect(sent.success).toBe(true);
+        expect(sent.messageId).toBe('3EB0OUTBOUND1');
+        expect(sent.route).toBe('lid');
+        expect(sent.chatId).toBe('92449473073158@lid');
+
+        const stored = await socketConfig.getMessage({
+            remoteJid: '92449473073158@lid',
+            fromMe: true,
+            id: '3EB0OUTBOUND1',
+        });
+        expect(stored).toEqual({ conversation: 'retryable hello' });
+
+        // fromMe remains ignored inbound
+        const fromMe = mapBaileysInbound(makeInboundMsg({
+            id: '3EB0OUTBOUND1',
+            remoteJid: '92449473073158@lid',
+            fromMe: true,
+            text: 'retryable hello',
+        }));
+        expect(fromMe.action).toBe('ignore');
+        expect(fromMe.reason).toBe('fromMe');
+
+        // update/ack handler must not enqueue inbound spool rows
+        const before = transport.spool.listRecent(20).length;
+        socket.ev.emit('messages.update', [{
+            key: { remoteJid: '92449473073158@lid', fromMe: true, id: '3EB0OUTBOUND1' },
+            update: { status: 2 },
+        }]);
+        socket.ev.emit('message-receipt.update', [{
+            key: { remoteJid: '92449473073158@lid', fromMe: true, id: '3EB0OUTBOUND1' },
+            receipt: { receiptTimestamp: 1700000000 },
+        }]);
+        await new Promise((r) => setImmediate(r));
+        expect(transport.spool.listRecent(20)).toHaveLength(before);
+
         await transport.stop();
     });
 });

@@ -21,6 +21,12 @@ const {
     createLidPhoneCache,
 } = require('./baileysMessageAdapter');
 const { createLidMappingStore } = require('./lidMappingStore');
+const { createOutboundMessageStore } = require('./outboundMessageStore');
+const { resolveOutboundJid } = require('./resolveOutboundJid');
+const {
+    installLibsignalSessionLogSilence,
+    getSessionChurnStats,
+} = require('./silenceLibsignalSessionLogs');
 
 const AUTH_DIR = process.env.BAILEYS_AUTH_DIR
     || path.join(process.cwd(), 'data', 'baileys-auth');
@@ -37,10 +43,14 @@ function createBaileysTransport({
     makeSocket = makeWASocket,
     useAuthState = useMultiFileAuthState,
     fetchVersion = fetchLatestBaileysVersion,
+    outboundStore = null,
 } = {}) {
     fs.mkdirSync(authDir, { recursive: true });
 
+    installLibsignalSessionLogSilence({ logger });
+
     const worker = deliveryWorker || createInboxDeliveryWorker({ spool });
+    const messageStore = outboundStore || createOutboundMessageStore();
     let sock = null;
     let saveCredsFn = null;
     let ready = false;
@@ -57,7 +67,10 @@ function createBaileysTransport({
     let reconnectTimer = null;
     let connectGeneration = 0;
     let messagesUpsertListeners = 0;
+    let messagesUpdateListeners = 0;
+    let messageReceiptListeners = 0;
     let authLoaded = false;
+    let getMessageStoreInitialized = true;
     const seenKeys = new Set();
     const lidStore = createLidMappingStore({ mapFile: lidMapFile });
     const lidCache = createLidPhoneCache(lidStore);
@@ -66,6 +79,8 @@ function createBaileysTransport({
         return {
             connectGeneration,
             messagesUpsertListeners,
+            messagesUpdateListeners,
+            messageReceiptListeners,
             reconnectAttempts,
             seenKeyCount: seenKeys.size,
             lidMappings: lidCache.size(),
@@ -73,6 +88,9 @@ function createBaileysTransport({
             lidMapFile,
             authDir,
             authLoaded,
+            getMessageStoreInitialized,
+            outboundMessageStore: messageStore.getStats(),
+            signalSessionChurn: getSessionChurnStats(),
         };
     }
 
@@ -123,6 +141,8 @@ function createBaileysTransport({
         try {
             current.ev.removeAllListeners('connection.update');
             current.ev.removeAllListeners('messages.upsert');
+            current.ev.removeAllListeners('messages.update');
+            current.ev.removeAllListeners('message-receipt.update');
             current.ev.removeAllListeners('creds.update');
             current.ev.removeAllListeners('contacts.upsert');
             current.ev.removeAllListeners('contacts.update');
@@ -140,6 +160,38 @@ function createBaileysTransport({
         if (reconnectTimer) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
+        }
+    }
+
+    function handleOutboundUpdates(updates, generation) {
+        if (generation !== connectGeneration || sock === null) return;
+        for (const item of updates || []) {
+            const key = item && item.key;
+            if (!key || !key.fromMe) continue; // outbound only — never inbound enqueue
+            const update = item.update || {};
+            logInbox('baileys_outbound_update', {
+                providerMessageId: key.id || null,
+                remoteJid: key.remoteJid || null,
+                status: update.status != null ? update.status : null,
+                at: utcNow(),
+            });
+        }
+    }
+
+    function handleOutboundReceipts(receipts, generation) {
+        if (generation !== connectGeneration || sock === null) return;
+        for (const item of receipts || []) {
+            const key = item && item.key;
+            if (!key || !key.fromMe) continue; // outbound only
+            const receipt = item.receipt || {};
+            logInbox('baileys_outbound_receipt', {
+                providerMessageId: key.id || null,
+                remoteJid: key.remoteJid || null,
+                receiptTimestamp: receipt.receiptTimestamp || null,
+                readTimestamp: receipt.readTimestamp || null,
+                playedTimestamp: receipt.playedTimestamp || null,
+                at: utcNow(),
+            });
         }
     }
 
@@ -240,7 +292,8 @@ function createBaileysTransport({
             printQRInTerminal: false,
             syncFullHistory: false,
             markOnlineOnConnect: false,
-            getMessage: async () => undefined,
+            // Baileys 6.7.22: required for decrypt-retry ("this message can take a while")
+            getMessage: async (key) => messageStore.getMessage(key),
         });
         sock = socket;
 
@@ -328,6 +381,28 @@ function createBaileysTransport({
             });
         });
 
+        messagesUpdateListeners += 1;
+        socket.ev.on('messages.update', (updates) => {
+            try {
+                handleOutboundUpdates(updates, generation);
+            } catch (err) {
+                logger.error('[baileys] outbound_update_failed', {
+                    error: err.message || String(err),
+                });
+            }
+        });
+
+        messageReceiptListeners += 1;
+        socket.ev.on('message-receipt.update', (receipts) => {
+            try {
+                handleOutboundReceipts(receipts, generation);
+            } catch (err) {
+                logger.error('[baileys] outbound_receipt_failed', {
+                    error: err.message || String(err),
+                });
+            }
+        });
+
         return socket;
     }
 
@@ -356,31 +431,70 @@ function createBaileysTransport({
                 error: 'WhatsApp transport is not ready. Please scan the QR code and try again.',
             };
         }
-        const digits = String(phone || '').replace(/\D/g, '');
-        if (!digits) {
-            return { success: false, status: 'failed', error: 'invalid_phone' };
+
+        const destination = resolveOutboundJid(phone, lidCache);
+        if (!destination.ok) {
+            return {
+                success: false,
+                status: 'failed',
+                error: destination.error || 'invalid_phone',
+            };
         }
-        const jid = `${digits}@s.whatsapp.net`;
+
+        const jid = destination.jid;
+        const text = String(message || '');
+        const outboundContent = { conversation: text };
         const sendStartedAt = Date.now();
         try {
-            const result = await sock.sendMessage(jid, { text: String(message || '') });
+            logger.info('[baileys] send_start', {
+                phone: destination.phone,
+                remoteJid: jid,
+                route: destination.route,
+            });
+            const result = await sock.sendMessage(jid, { text });
             const sendCompletedAt = Date.now();
             const messageId = result?.key?.id || null;
+            const resultKey = result?.key || {
+                remoteJid: jid,
+                fromMe: true,
+                id: messageId,
+            };
+            const storedContent = result?.message || outboundContent;
+            if (messageId) {
+                messageStore.put(resultKey, storedContent);
+            }
+            logger.info('[baileys] send_end', {
+                phone: destination.phone,
+                remoteJid: jid,
+                route: destination.route,
+                providerMessageId: messageId,
+                sendLatencyMs: sendCompletedAt - sendStartedAt,
+                storedForRetry: Boolean(messageId),
+            });
             return {
                 success: true,
                 status: 'sent',
                 messageId,
-                phone: digits,
+                phone: destination.phone,
                 chatId: jid,
+                route: destination.route,
                 sendLatencyMs: sendCompletedAt - sendStartedAt,
             };
         } catch (error) {
             lastError = error.message || String(error);
+            logger.error('[baileys] send_failed', {
+                phone: destination.phone,
+                remoteJid: jid,
+                route: destination.route,
+                error: lastError,
+            });
             return {
                 success: false,
                 status: 'failed',
                 error: lastError,
-                phone: digits,
+                phone: destination.phone,
+                chatId: jid,
+                route: destination.route,
             };
         }
     }
@@ -402,6 +516,8 @@ function createBaileysTransport({
         deliveryWorker: worker,
         lidCache,
         lidStore,
+        outboundStore: messageStore,
+        resolveOutboundJid: (phone) => resolveOutboundJid(phone, lidCache),
     };
 }
 
