@@ -70,6 +70,11 @@ function createBaileysTransport({
     let messagesUpsertListenersTotal = 0;
     let messagesUpdateListenersTotal = 0;
     let messageReceiptListenersTotal = 0;
+    let currentSocketListenersAttached = {
+        messagesUpsert: 0,
+        messagesUpdate: 0,
+        messageReceipt: 0,
+    };
     let authLoaded = false;
     let getMessageStoreInitialized = true;
     let lastOutboundAt = null;
@@ -82,18 +87,14 @@ function createBaileysTransport({
     const lidCache = createLidPhoneCache(lidStore);
 
     function getCurrentSocketListenerCounts() {
-        if (!sock || !sock.ev || typeof sock.ev.listenerCount !== 'function') {
+        if (sock && sock.ev && typeof sock.ev.listenerCount === 'function') {
             return {
-                messagesUpsert: 0,
-                messagesUpdate: 0,
-                messageReceipt: 0,
+                messagesUpsert: sock.ev.listenerCount('messages.upsert'),
+                messagesUpdate: sock.ev.listenerCount('messages.update'),
+                messageReceipt: sock.ev.listenerCount('message-receipt.update'),
             };
         }
-        return {
-            messagesUpsert: sock.ev.listenerCount('messages.upsert'),
-            messagesUpdate: sock.ev.listenerCount('messages.update'),
-            messageReceipt: sock.ev.listenerCount('message-receipt.update'),
-        };
+        return { ...currentSocketListenersAttached };
     }
 
     function getDiagnostics() {
@@ -183,6 +184,11 @@ function createBaileysTransport({
             current.ev.removeAllListeners('chats.upsert');
             current.ev.removeAllListeners('chats.update');
             current.ev.removeAllListeners('messaging-history.set');
+            currentSocketListenersAttached = {
+                messagesUpsert: 0,
+                messagesUpdate: 0,
+                messageReceipt: 0,
+            };
             await current.end(undefined);
         } catch (_) {
             // ignore teardown errors
@@ -474,6 +480,12 @@ function createBaileysTransport({
                 });
             }
         });
+
+        currentSocketListenersAttached = {
+            messagesUpsert: 1,
+            messagesUpdate: 1,
+            messageReceipt: 1,
+        };
 
         return socket;
     }
