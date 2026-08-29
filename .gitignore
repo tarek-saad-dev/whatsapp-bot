@@ -19,6 +19,9 @@ sessions/
 auth/
 .wwebjs_auth/
 .wwebjs_cache/
+data/baileys-auth/
+data/lid-phone-map.json
+data/lid-identity-log.jsonl
 
 # Customer/contact data
 contacts.xlsx
