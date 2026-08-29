@@ -19,6 +19,7 @@ const {
     shouldProcessUpsert,
     mapBaileysInbound,
     createLidPhoneCache,
+    buildRawUpsertSample,
 } = require('./baileysMessageAdapter');
 const { createLidMappingStore } = require('./lidMappingStore');
 const { createOutboundMessageStore } = require('./outboundMessageStore');
@@ -66,9 +67,9 @@ function createBaileysTransport({
     let listening = false;
     let reconnectTimer = null;
     let connectGeneration = 0;
-    let messagesUpsertListeners = 0;
-    let messagesUpdateListeners = 0;
-    let messageReceiptListeners = 0;
+    let messagesUpsertListenersTotal = 0;
+    let messagesUpdateListenersTotal = 0;
+    let messageReceiptListenersTotal = 0;
     let authLoaded = false;
     let getMessageStoreInitialized = true;
     let lastOutboundAt = null;
@@ -80,13 +81,33 @@ function createBaileysTransport({
     const lidStore = createLidMappingStore({ mapFile: lidMapFile });
     const lidCache = createLidPhoneCache(lidStore);
 
+    function getCurrentSocketListenerCounts() {
+        if (!sock || !sock.ev || typeof sock.ev.listenerCount !== 'function') {
+            return {
+                messagesUpsert: 0,
+                messagesUpdate: 0,
+                messageReceipt: 0,
+            };
+        }
+        return {
+            messagesUpsert: sock.ev.listenerCount('messages.upsert'),
+            messagesUpdate: sock.ev.listenerCount('messages.update'),
+            messageReceipt: sock.ev.listenerCount('message-receipt.update'),
+        };
+    }
+
     function getDiagnostics() {
         const storeStats = messageStore.getStats();
+        const currentSocketListeners = getCurrentSocketListenerCounts();
         return {
             connectGeneration,
-            messagesUpsertListeners,
-            messagesUpdateListeners,
-            messageReceiptListeners,
+            currentSocketListeners,
+            messagesUpsertListeners: currentSocketListeners.messagesUpsert,
+            messagesUpdateListeners: currentSocketListeners.messagesUpdate,
+            messageReceiptListeners: currentSocketListeners.messageReceipt,
+            messagesUpsertListenersTotal,
+            messagesUpdateListenersTotal,
+            messageReceiptListenersTotal,
             reconnectAttempts,
             seenKeyCount: seenKeys.size,
             lidMappings: lidCache.size(),
@@ -213,28 +234,49 @@ function createBaileysTransport({
         }
     }
 
+    function logRawUpsert(upsert, generation) {
+        const messages = upsert?.messages || [];
+        const sample = messages.slice(0, 5).map((msg) => buildRawUpsertSample(msg));
+        logInbox('baileys_raw_upsert', {
+            generation,
+            upsertType: upsert?.type || null,
+            count: messages.length,
+            sample: JSON.stringify(sample),
+        });
+    }
+
+    function logUpsertIgnoredPerMessage(upsert, reason) {
+        const messages = upsert?.messages || [];
+        if (messages.length === 0) {
+            logInbox('baileys_upsert_ignored', {
+                reason,
+                upsertType: upsert?.type || null,
+                count: 0,
+            });
+            return;
+        }
+        for (const msg of messages) {
+            const key = msg?.key || {};
+            logInbox('baileys_upsert_ignored', {
+                reason,
+                upsertType: upsert?.type || null,
+                messageId: key.id || null,
+                remoteJid: key.remoteJid || null,
+                senderPn: key.senderPn || key.participantPn || null,
+                fromMe: Boolean(key.fromMe),
+            });
+        }
+    }
+
     async function handleMessagesUpsert(upsert, generation) {
-        if (generation !== connectGeneration || sock === null) return;
+        if (generation !== connectGeneration || sock === null) {
+            logUpsertIgnoredPerMessage(upsert, 'stale_generation');
+            return;
+        }
 
         const gate = shouldProcessUpsert(upsert);
         if (!gate.accept) {
-            const sample = (upsert.messages || []).slice(0, 5).map((msg) => ({
-                id: msg?.key?.id || null,
-                fromMe: Boolean(msg?.key?.fromMe),
-                remoteJid: msg?.key?.remoteJid || null,
-                senderPn: msg?.key?.senderPn || null,
-                text: String(
-                    msg?.message?.conversation
-                    || msg?.message?.extendedTextMessage?.text
-                    || '',
-                ).slice(0, 80),
-            }));
-            logInbox('baileys_upsert_ignored', {
-                reason: gate.reason,
-                type: upsert.type,
-                count: (upsert.messages || []).length,
-                sample,
-            });
+            logUpsertIgnoredPerMessage(upsert, gate.reason);
             return;
         }
 
@@ -243,7 +285,12 @@ function createBaileysTransport({
             const captureStartedAt = utcNow();
             const mapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
             if (mapped.action === 'duplicate') {
-                logInbox('baileys_duplicate_ignored', { dedupeKey: mapped.dedupeKey });
+                logInbox('baileys_inbound_ignored', {
+                    reason: 'duplicate',
+                    dedupeKey: mapped.dedupeKey,
+                    remoteJid: msg?.key?.remoteJid || null,
+                    messageId: msg?.key?.id || null,
+                });
                 continue;
             }
             if (mapped.action !== 'capture') {
@@ -254,6 +301,7 @@ function createBaileysTransport({
                     reason: mapped.reason,
                     remoteJid: mapped.remoteJid,
                     customerJid: mapped.customerJid,
+                    messageId: msg?.key?.id || null,
                 });
                 continue;
             }
@@ -273,7 +321,11 @@ function createBaileysTransport({
             };
 
             if (spool.hasProviderMessageId(mapped.providerMessageId)) {
-                logInbox('baileys_spool_duplicate', { providerMessageId: mapped.providerMessageId });
+                logInbox('baileys_inbound_ignored', {
+                    reason: 'spool_duplicate',
+                    providerMessageId: mapped.providerMessageId,
+                    messageId: msg?.key?.id || null,
+                });
                 continue;
             }
 
@@ -391,15 +443,17 @@ function createBaileysTransport({
             }
         });
 
-        messagesUpsertListeners += 1;
+        messagesUpsertListenersTotal += 1;
         socket.ev.on('messages.upsert', (upsert) => {
+            logRawUpsert(upsert, generation);
             handleMessagesUpsert(upsert, generation).catch((err) => {
                 lastError = err.message || String(err);
                 logger.error('[baileys] upsert_failed', { error: lastError });
+                logUpsertIgnoredPerMessage(upsert, 'handler_error');
             });
         });
 
-        messagesUpdateListeners += 1;
+        messagesUpdateListenersTotal += 1;
         socket.ev.on('messages.update', (updates) => {
             try {
                 handleOutboundUpdates(updates, generation);
@@ -410,7 +464,7 @@ function createBaileysTransport({
             }
         });
 
-        messageReceiptListeners += 1;
+        messageReceiptListenersTotal += 1;
         socket.ev.on('message-receipt.update', (receipts) => {
             try {
                 handleOutboundReceipts(receipts, generation);

@@ -197,14 +197,16 @@ describe('baileysTransport reconnect safety', () => {
         });
 
         await transport.start();
-        expect(transport.getDiagnostics().messagesUpsertListeners).toBe(1);
-        expect(transport.getDiagnostics().messagesUpdateListeners).toBe(1);
-        expect(transport.getDiagnostics().messageReceiptListeners).toBe(1);
+        expect(transport.getDiagnostics().currentSocketListeners.messagesUpsert).toBe(1);
+        expect(transport.getDiagnostics().currentSocketListeners.messagesUpdate).toBe(1);
+        expect(transport.getDiagnostics().currentSocketListeners.messageReceipt).toBe(1);
+        expect(transport.getDiagnostics().messagesUpsertListenersTotal).toBe(1);
         expect(transport.getDiagnostics().getMessageStoreInitialized).toBe(true);
 
         await transport.connect();
-        expect(transport.getDiagnostics().messagesUpsertListeners).toBe(2);
-        expect(transport.getDiagnostics().messagesUpdateListeners).toBe(2);
+        expect(transport.getDiagnostics().currentSocketListeners.messagesUpsert).toBe(1);
+        expect(transport.getDiagnostics().currentSocketListeners.messagesUpdate).toBe(1);
+        expect(transport.getDiagnostics().messagesUpsertListenersTotal).toBe(2);
         expect(sockets).toHaveLength(2);
 
         const liveSocket = sockets[sockets.length - 1];

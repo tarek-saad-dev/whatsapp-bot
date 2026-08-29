@@ -193,6 +193,28 @@ function buildDedupeKey(remoteJid, messageId) {
     return `${legacyJid}|${messageId}`;
 }
 
+function buildRawUpsertSample(msg, { maxMessageKeys = 8 } = {}) {
+    const key = msg?.key || {};
+    const message = msg?.message || {};
+    const unwrapped = unwrapMessageContent(message);
+    let contentType = null;
+    try {
+        contentType = unwrapped ? getContentType(unwrapped) : null;
+    } catch (_) {
+        contentType = null;
+    }
+    const senderPn = String(key.senderPn || key.participantPn || '').trim() || null;
+    return {
+        messageId: key.id || null,
+        remoteJid: key.remoteJid || null,
+        senderPn,
+        fromMe: Boolean(key.fromMe),
+        messageKeys: Object.keys(message).slice(0, maxMessageKeys),
+        contentType,
+        timestamp: msg?.messageTimestamp ?? null,
+    };
+}
+
 function shouldProcessUpsert(upsert) {
     if (!isLiveUpsertType(upsert && upsert.type)) {
         return { accept: false, reason: 'not_live_notify' };
@@ -314,6 +336,7 @@ module.exports = {
     extractText,
     hasMedia,
     buildDedupeKey,
+    buildRawUpsertSample,
     shouldProcessUpsert,
     mapBaileysInbound,
 };
