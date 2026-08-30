@@ -18,12 +18,14 @@ const { logInbox } = require('../../inbox/inboxLogger');
 const {
     shouldProcessUpsert,
     mapBaileysInbound,
+    mapBaileysOutboundObserved,
     createLidPhoneCache,
     buildRawUpsertSample,
 } = require('./baileysMessageAdapter');
 const { createLidMappingStore } = require('./lidMappingStore');
 const { createOutboundMessageStore } = require('./outboundMessageStore');
 const { resolveOutboundJid } = require('./resolveOutboundJid');
+const { createOutboundObservedPoster } = require('../../inbox/outboundObservedPoster');
 const {
     installLibsignalSessionLogSilence,
     getSessionChurnStats,
@@ -39,6 +41,7 @@ function createBaileysTransport({
     lidMapFile = LID_MAP_FILE,
     spool = createInboxSpool(),
     deliveryWorker = null,
+    outboundObservedPoster = null,
     includeGroups = process.env.WHATSAPP_INBOX_INCLUDE_GROUPS === 'true',
     logger = console,
     makeSocket = makeWASocket,
@@ -51,6 +54,7 @@ function createBaileysTransport({
     installLibsignalSessionLogSilence({ logger });
 
     const worker = deliveryWorker || createInboxDeliveryWorker({ spool });
+    const outboundPoster = outboundObservedPoster || createOutboundObservedPoster();
     const messageStore = outboundStore || createOutboundMessageStore();
     let sock = null;
     let saveCredsFn = null;
@@ -83,6 +87,7 @@ function createBaileysTransport({
     let lastOutboundRoute = null;
     let lastOutboundRemoteJid = null;
     const seenKeys = new Set();
+    const seenOutboundKeys = new Set();
     const lidStore = createLidMappingStore({ mapFile: lidMapFile });
     const lidCache = createLidPhoneCache(lidStore);
 
@@ -289,6 +294,49 @@ function createBaileysTransport({
         const waDetectedAt = utcNow();
         for (const msg of upsert.messages || []) {
             const captureStartedAt = utcNow();
+
+            // Human/manual (and automated) fromMe outbounds → Cashier observation webhook.
+            // Never crash Baileys if Cashier is down.
+            if (msg?.key?.fromMe) {
+                try {
+                    const observed = mapBaileysOutboundObserved(msg, {
+                        includeGroups,
+                        lidCache,
+                        seenOutboundKeys,
+                    });
+                    if (observed.action === 'observe') {
+                        outboundPoster.observe(observed.payload).catch((err) => {
+                            logInbox('outbound_observed_handler_error', {
+                                providerMessageId: observed.providerMessageId,
+                                error: err && err.message ? err.message : String(err),
+                            });
+                        });
+                        logInbox('baileys_outbound_observed', {
+                            providerMessageId: observed.providerMessageId,
+                            phone: observed.phone,
+                            remoteJid: observed.remoteJid,
+                        });
+                    } else if (observed.action === 'duplicate') {
+                        logInbox('baileys_outbound_ignored', {
+                            reason: 'duplicate',
+                            providerMessageId: observed.providerMessageId,
+                        });
+                    } else {
+                        logInbox('baileys_outbound_ignored', {
+                            reason: observed.reason,
+                            remoteJid: observed.remoteJid || msg?.key?.remoteJid || null,
+                            messageId: msg?.key?.id || null,
+                        });
+                    }
+                } catch (err) {
+                    logInbox('outbound_observed_handler_error', {
+                        messageId: msg?.key?.id || null,
+                        error: err && err.message ? err.message : String(err),
+                    });
+                }
+                continue;
+            }
+
             const mapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
             if (mapped.action === 'duplicate') {
                 logInbox('baileys_inbound_ignored', {

@@ -321,6 +321,100 @@ function mapBaileysInbound(msg, {
     };
 }
 
+function mapBaileysOutboundObserved(msg, {
+    includeGroups = false,
+    lidCache = null,
+    seenOutboundKeys = null,
+} = {}) {
+    const key = msg.key || {};
+    if (!key.fromMe) {
+        return { action: 'ignore', reason: 'not_fromMe' };
+    }
+
+    const remoteJid = String(key.remoteJid || '');
+    // Do NOT early-block @lid: resolve LID → phone via cache/senderPn first
+    // (same pattern as inbound). Broadcast/status still fail isAllowedRemoteJid.
+    if (isGroupJid(remoteJid) && !includeGroups) {
+        return { action: 'ignore', reason: 'group', remoteJid };
+    }
+
+    const customerJid = resolveCustomerJid(key, lidCache);
+    if (isLidUser(remoteJid) && lidCache) {
+        const senderPn = String(key.senderPn || key.participantPn || '').trim();
+        if (senderPn && customerJid === senderPn) {
+            lidCache.rememberPn(remoteJid, senderPn, 'message.senderPn');
+        }
+    }
+    if (!isAllowedRemoteJid(customerJid, { includeGroups })) {
+        return {
+            action: 'ignore',
+            reason: isLidUser(customerJid) || isLidUser(remoteJid) ? 'unresolved_lid' : 'blocked_jid',
+            remoteJid,
+            customerJid,
+        };
+    }
+
+    const messageId = String(key.id || '').trim();
+    if (!messageId) {
+        return { action: 'ignore', reason: 'missing_message_id' };
+    }
+
+    const dedupeKey = `out:${buildDedupeKey(customerJid, messageId)}`;
+    if (seenOutboundKeys && seenOutboundKeys.has(dedupeKey)) {
+        return { action: 'duplicate', dedupeKey, providerMessageId: messageId };
+    }
+
+    const unwrapped = unwrapMessageContent(msg.message);
+    if (isProtocolOrSystemMessage(unwrapped)) {
+        return { action: 'ignore', reason: 'protocol_or_system' };
+    }
+
+    const text = extractText(msg.message);
+    const media = hasMedia(msg.message);
+    if (!text && !media) {
+        return { action: 'ignore', reason: 'empty_content' };
+    }
+
+    const phone = phoneFromJid(customerJid);
+    if (!phone) {
+        return { action: 'ignore', reason: 'missing_phone', customerJid };
+    }
+
+    const ts = Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000);
+    const occurredAt = new Date(ts * 1000).toISOString();
+
+    if (seenOutboundKeys) seenOutboundKeys.add(dedupeKey);
+
+    return {
+        action: 'observe',
+        dedupeKey,
+        providerMessageId: messageId,
+        phone,
+        text: text || null,
+        occurredAt,
+        remoteJid,
+        customerJid,
+        payload: {
+            provider: 'whatsapp-web',
+            providerMessageId: messageId,
+            phone,
+            text: text || null,
+            occurredAt,
+            rawPayload: {
+                baileysKey: {
+                    id: key.id || null,
+                    remoteJid: key.remoteJid || null,
+                    fromMe: true,
+                    senderPn: key.senderPn || key.participantPn || null,
+                },
+                transport: 'baileys',
+                sourceRemoteJid: remoteJid,
+                resolvedCustomerJid: customerJid,
+            },
+        },
+    };
+}
+
 module.exports = {
     LIVE_UPSERT_TYPE,
     isLiveUpsertType,
@@ -339,4 +433,5 @@ module.exports = {
     buildRawUpsertSample,
     shouldProcessUpsert,
     mapBaileysInbound,
+    mapBaileysOutboundObserved,
 };

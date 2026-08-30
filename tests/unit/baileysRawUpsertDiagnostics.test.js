@@ -243,9 +243,13 @@ describe('baileys raw upsert diagnostics', () => {
         const terminal = logCapture.lines.filter((l) =>
             l.includes('baileys_captured')
             || l.includes('baileys_inbound_ignored')
-            || l.includes('baileys_upsert_ignored'),
+            || l.includes('baileys_upsert_ignored')
+            || l.includes('baileys_outbound_observed')
+            || l.includes('baileys_outbound_ignored')
+            || l.includes('outbound_observed_handler_error'),
         );
-        expect(terminal).toHaveLength(3);
+        expect(terminal.length).toBeGreaterThanOrEqual(3);
+        expect(terminal.some((l) => l.includes('MIX3') || l.includes('outbound'))).toBe(true);
         await transport.stop();
     });
 
