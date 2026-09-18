@@ -6,6 +6,11 @@ const { validateAccountKey } = require('./accountKey');
 const { createBaileysProvider } = require('./baileysProvider');
 const { CONNECTION_STATES } = require('./connectionStates');
 const {
+  createManagedAccountRegistry,
+  DESIRED_RUNNING,
+  DESIRED_STOPPED,
+} = require('./managedAccountRegistry');
+const {
   isMultiAccountEnabled,
   getManagedAuthBaseDir,
   getSendQueueMax,
@@ -21,6 +26,7 @@ function createWhatsAppAccountManager({
   enabled = isMultiAccountEnabled,
   authBaseDir = getManagedAuthBaseDir(),
   sendQueueMax = getSendQueueMax(),
+  registry = createManagedAccountRegistry(),
   logger = console,
 } = {}) {
   /** @type {Map<string, { provider: any, queue: any }>} */
@@ -46,6 +52,22 @@ function createWhatsAppAccountManager({
     return validated.accountKey;
   }
 
+  function persistDesired(accountKey, desiredState) {
+    try {
+      registry.setDesiredState(accountKey, desiredState);
+    } catch (err) {
+      logger.error('[drvowa-registry] persist_failed', {
+        accountKey,
+        desiredState,
+        code: err && err.code ? err.code : 'REGISTRY_WRITE_FAILED',
+      });
+    }
+  }
+
+  function markLoggedOutStopped(accountKey) {
+    persistDesired(accountKey, DESIRED_STOPPED);
+  }
+
   function getOrCreate(accountKey) {
     const key = requireValidKey(accountKey);
     let entry = accounts.get(key);
@@ -55,6 +77,10 @@ function createWhatsAppAccountManager({
       accountKey: key,
       authBaseDir,
       logger,
+      printQrToTerminal: false,
+      onLoggedOut: () => {
+        markLoggedOutStopped(key);
+      },
     });
     const queue = createQueue({ concurrency: 1, maxQueued: sendQueueMax });
     entry = { provider, queue };
@@ -65,26 +91,42 @@ function createWhatsAppAccountManager({
   async function start(accountKey) {
     assertEnabled();
     const key = requireValidKey(accountKey);
+    persistDesired(key, DESIRED_RUNNING);
+
     const existing = accounts.get(key);
     if (existing) {
-      // Duplicate start must not create a second socket/runtime.
       const status = existing.provider.getStatus();
       if (status.state === CONNECTION_STATES.LOGGED_OUT) {
+        markLoggedOutStopped(key);
+        return status;
+      }
+      if (status.state === CONNECTION_STATES.READY || status.ready) {
         return status;
       }
       if (status.state !== CONNECTION_STATES.STOPPED
         && status.state !== CONNECTION_STATES.ERROR) {
         return status;
       }
-      return existing.provider.start();
+      const started = await existing.provider.start();
+      if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+        markLoggedOutStopped(key);
+      }
+      return started;
     }
+
     const entry = getOrCreate(key);
-    return entry.provider.start();
+    const started = await entry.provider.start();
+    if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+      markLoggedOutStopped(key);
+    }
+    return started;
   }
 
   async function stop(accountKey) {
     assertEnabled();
     const key = requireValidKey(accountKey);
+    persistDesired(key, DESIRED_STOPPED);
+
     const entry = accounts.get(key);
     if (!entry) {
       return {
@@ -155,6 +197,7 @@ function createWhatsAppAccountManager({
 
     const current = entry.provider.getStatus();
     if (current.state === CONNECTION_STATES.LOGGED_OUT) {
+      markLoggedOutStopped(key);
       return {
         success: false,
         status: 'failed',
@@ -209,7 +252,15 @@ function createWhatsAppAccountManager({
   async function stopAll() {
     const keys = [...accounts.keys()];
     for (const key of keys) {
-      await stop(key).catch(() => {});
+      // stopAll during shutdown should not flip desiredState to STOPPED
+      const entry = accounts.get(key);
+      if (!entry) continue;
+      try {
+        await entry.provider.stop();
+      } catch (_) {
+        // ignore
+      }
+      accounts.delete(key);
     }
   }
 
@@ -222,10 +273,13 @@ function createWhatsAppAccountManager({
     listAccountKeys,
     getAuthDir,
     stopAll,
+    registry,
     _accounts: accounts,
   };
 }
 
 module.exports = {
   createWhatsAppAccountManager,
+  DESIRED_RUNNING,
+  DESIRED_STOPPED,
 };

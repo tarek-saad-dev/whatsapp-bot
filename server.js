@@ -6,8 +6,35 @@ const whatsappRouter = require('./routes/whatsapp');
 const accountsRouter = require('./routes/accounts');
 const whatsappService = require('./services/whatsappService');
 const { isBaileysTransport } = require('./services/transport/config');
+const {
+  startManagedAccountRecovery,
+  getWhatsAppAccountManager,
+} = require('./services/drvowa');
 
 const app = express();
+
+let shutdownHooksRegistered = false;
+
+function registerManagedShutdownHooks() {
+  if (shutdownHooksRegistered) return;
+  shutdownHooksRegistered = true;
+
+  const shutdown = async (signal) => {
+    console.log(`[drvowa] shutdown ${signal} — stopping managed sockets`);
+    try {
+      await getWhatsAppAccountManager().stopAll();
+    } catch (_) {
+      // never block process exit on managed cleanup failure
+    }
+  };
+
+  process.once('SIGINT', () => {
+    shutdown('SIGINT').finally(() => process.exit(0));
+  });
+  process.once('SIGTERM', () => {
+    shutdown('SIGTERM').finally(() => process.exit(0));
+  });
+}
 
 function getPort() {
     return Number(process.env.PORT || 3000);
@@ -138,6 +165,7 @@ function listen() {
 async function startServer() {
     console.log('Starting WhatsApp Messaging Gateway...');
     console.log('WhatsApp service will initialize automatically when the first message is sent.');
+    registerManagedShutdownHooks();
 
     const inboxListen = process.env.WHATSAPP_INBOX_LISTEN === 'true';
     if (inboxListen) {
@@ -159,12 +187,25 @@ async function startServer() {
     freePort(getPort());
 
     try {
-        return await listen();
+        const server = await listen();
+        // Recover managed accounts after HTTP is ready; never block legacy startup.
+        setImmediate(() => {
+            startManagedAccountRecovery().catch((err) => {
+                console.error('[drvowa-recovery] unexpected_failure', {
+                    code: err && err.code ? err.code : 'RECOVERY_FAILED',
+                });
+            });
+        });
+        return server;
     } catch (err) {
         if (err.code === 'EADDRINUSE') {
             console.warn(`Port ${getPort()} still in use. Retrying cleanup...`);
             freePort(getPort());
-            return await listen();
+            const server = await listen();
+            setImmediate(() => {
+                startManagedAccountRecovery().catch(() => {});
+            });
+            return server;
         }
 
         throw err;

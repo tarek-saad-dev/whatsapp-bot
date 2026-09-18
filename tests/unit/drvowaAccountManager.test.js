@@ -12,8 +12,8 @@ const { buildDrvowaInboundDto } = require('../../services/drvowa/inboundDto');
 const { shouldProcessUpsert } = require('../../services/transport/baileys/baileysMessageAdapter');
 const { createSendQueue } = require('../../services/sendQueue');
 
-function createFakeProviderFactory({ onCreate } = {}) {
-  return function createProvider({ accountKey, authBaseDir }) {
+function createFakeProviderFactory({ onCreate, hasAuth = true } = {}) {
+  return function createProvider({ accountKey, authBaseDir, onLoggedOut, printQrToTerminal }) {
     const authDir = path.join(authBaseDir, accountKey);
     fs.mkdirSync(authDir, { recursive: true });
     let state = CONNECTION_STATES.STOPPED;
@@ -23,10 +23,12 @@ function createFakeProviderFactory({ onCreate } = {}) {
     let reconnectAttempts = 0;
     let connectCalls = 0;
     const sendCalls = [];
+    const sessionHasAuth = hasAuth;
 
     const provider = {
       accountKey,
       authDir,
+      printQrToTerminal: printQrToTerminal === true,
       async start() {
         connectCalls += 1;
         if (loggedOut) {
@@ -35,6 +37,12 @@ function createFakeProviderFactory({ onCreate } = {}) {
           return this.getStatus();
         }
         state = CONNECTION_STATES.CONNECTING;
+        if (!sessionHasAuth) {
+          state = CONNECTION_STATES.QR_REQUIRED;
+          ready = false;
+          qr = 'EPHEMERAL_QR';
+          return this.getStatus();
+        }
         state = CONNECTION_STATES.READY;
         ready = true;
         qr = null;
@@ -84,6 +92,9 @@ function createFakeProviderFactory({ onCreate } = {}) {
         ready = false;
         state = CONNECTION_STATES.LOGGED_OUT;
         qr = null;
+        if (typeof onLoggedOut === 'function') {
+          onLoggedOut({ accountKey });
+        }
       },
       _tryReconnect() {
         if (loggedOut) return false;
@@ -117,14 +128,25 @@ describe('DRVOWA Phase 2A account manager', () => {
 
   function makeManager(overrides = {}) {
     const created = [];
+    const { createManagedAccountRegistry } = require('../../services/drvowa/managedAccountRegistry');
+    const {
+      registry: registryOverride,
+      createProvider: createProviderOverride,
+      ...rest
+    } = overrides;
+    const registry = registryOverride || createManagedAccountRegistry({
+      filePath: path.join(tmpDir, 'runtime-registry.json'),
+    });
     const manager = createWhatsAppAccountManager({
       enabled: () => true,
       authBaseDir: tmpDir,
       sendQueueMax: overrides.sendQueueMax || 2,
-      createProvider: createFakeProviderFactory({
+      registry,
+      createProvider: createProviderOverride || createFakeProviderFactory({
         onCreate: (p) => created.push(p),
       }),
-      ...overrides,
+      ...rest,
+      registry,
     });
     manager._createdProviders = created;
     managers.push(manager);

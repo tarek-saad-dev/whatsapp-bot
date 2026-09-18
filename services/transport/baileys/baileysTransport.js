@@ -49,6 +49,8 @@ function createBaileysTransport({
     fetchVersion = fetchLatestBaileysVersion,
     outboundStore = null,
     onLiveInbound = null,
+    printQrToTerminal = true,
+    onLoggedOut = null,
 } = {}) {
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -501,7 +503,9 @@ function createBaileysTransport({
                 qrRequired = true;
                 lastQr = qr;
                 logger.info('[baileys] QR required — scan with Linked devices on the salon phone');
-                qrcode.generate(qr, { small: true });
+                if (printQrToTerminal) {
+                    qrcode.generate(qr, { small: true });
+                }
             }
             if (connection === 'open') {
                 ready = true;
@@ -533,6 +537,13 @@ function createBaileysTransport({
                     qrRequired = false;
                     lastQr = null;
                     clearReconnectTimer();
+                    if (typeof onLoggedOut === 'function') {
+                        try {
+                            onLoggedOut({ statusCode, accountAuthDir: authDir });
+                        } catch (_) {
+                            // never break socket handling on hook failure
+                        }
+                    }
                 }
 
                 if (!stopping && !isLoggedOut && sock === socket) {

@@ -30,6 +30,8 @@ function createBaileysProvider({
   authBaseDir = getManagedAuthBaseDir(),
   logger = console,
   onInboundDto = null,
+  onLoggedOut = null,
+  printQrToTerminal = false,
 } = {}) {
   if (!accountKey) {
     throw new Error('accountKey is required');
@@ -39,6 +41,13 @@ function createBaileysProvider({
   const lidMapFile = path.join(authDir, 'lid-phone-map.json');
   const spoolFile = path.join(authDir, 'inbox-spool.json');
   fs.mkdirSync(authDir, { recursive: true });
+
+  // Hard invariant: managed auth must never resolve to legacy singleton auth.
+  const legacyAuth = path.resolve(process.cwd(), 'data', 'baileys-auth');
+  if (path.resolve(authDir) === legacyAuth
+    || path.resolve(authDir).startsWith(`${legacyAuth}${path.sep}`)) {
+    throw new Error('Managed account authDir must not use legacy baileys-auth path');
+  }
 
   const inboundEvents = [];
   let explicitState = CONNECTION_STATES.STOPPED;
@@ -59,6 +68,14 @@ function createBaileysProvider({
       },
     },
     logger,
+    printQrToTerminal,
+    onLoggedOut: () => {
+      explicitState = CONNECTION_STATES.LOGGED_OUT;
+      lastErrorCode = 'LOGGED_OUT';
+      if (typeof onLoggedOut === 'function') {
+        onLoggedOut({ accountKey });
+      }
+    },
     onLiveInbound: (event) => {
       const dto = buildDrvowaInboundDto({
         accountKey,
@@ -160,7 +177,6 @@ function createBaileysProvider({
         || (transportStatus.loggedOut ? 'LOGGED_OUT' : null),
       reconnectAttempts: transportStatus.reconnectAttempts || 0,
       authDir,
-      // never expose auth JSON / credentials
     };
   }
 
