@@ -3,6 +3,7 @@ require('dotenv').config();
 const { execSync } = require('child_process');
 const express = require('express');
 const whatsappRouter = require('./routes/whatsapp');
+const accountsRouter = require('./routes/accounts');
 const whatsappService = require('./services/whatsappService');
 const { isBaileysTransport } = require('./services/transport/config');
 
@@ -16,6 +17,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/whatsapp', whatsappRouter);
+app.use('/api/accounts', accountsRouter);
 
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

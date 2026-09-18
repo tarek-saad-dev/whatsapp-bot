@@ -7,9 +7,17 @@ const { performance } = require('perf_hooks');
  * concurrency must stay 1 — parallel drv.get/sendKeys corrupt each other.
  */
 
-function createSendQueue({ concurrency = 1 } = {}) {
+function createSendQueue({ concurrency = 1, maxQueued = Infinity } = {}) {
   if (concurrency !== 1) {
     throw new Error('WhatsApp send queue only supports concurrency=1');
+  }
+
+  const queueLimit = Number(maxQueued);
+  if (!Number.isFinite(queueLimit) && queueLimit !== Infinity) {
+    throw new Error('maxQueued must be a positive number or Infinity');
+  }
+  if (Number.isFinite(queueLimit) && (queueLimit < 1 || !Number.isInteger(queueLimit))) {
+    throw new Error('maxQueued must be an integer >= 1');
   }
 
   let active = 0;
@@ -25,6 +33,9 @@ function createSendQueue({ concurrency = 1 } = {}) {
    * @returns {Promise<T>}
    */
   function enqueue(task) {
+    if (Number.isFinite(queueLimit) && queued >= queueLimit) {
+      return Promise.reject(Object.assign(new Error('send_queue_full'), { code: 'QUEUE_FULL' }));
+    }
     queued += 1;
     const enqueuedAt = performance.now();
     const run = chain.then(async () => {
@@ -53,6 +64,7 @@ function createSendQueue({ concurrency = 1 } = {}) {
       queued,
       maxConcurrent,
       concurrency: 1,
+      maxQueued: Number.isFinite(queueLimit) ? queueLimit : null,
     };
   }
 

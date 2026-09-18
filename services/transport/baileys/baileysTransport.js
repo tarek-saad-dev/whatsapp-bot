@@ -48,6 +48,7 @@ function createBaileysTransport({
     useAuthState = useMultiFileAuthState,
     fetchVersion = fetchLatestBaileysVersion,
     outboundStore = null,
+    onLiveInbound = null,
 } = {}) {
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -60,6 +61,9 @@ function createBaileysTransport({
     let saveCredsFn = null;
     let ready = false;
     let qrRequired = false;
+    let lastQr = null;
+    let loggedOut = false;
+    let lastDisconnectCode = null;
     let lastError = null;
     let lastEventAt = null;
     let lastCapturedCount = 0;
@@ -157,6 +161,9 @@ function createBaileysTransport({
             ready,
             connected: ready,
             qrRequired,
+            qrAvailable: Boolean(lastQr),
+            loggedOut,
+            lastDisconnectCode,
             reconnectAttempts,
             lastConnectedAt,
             lastDisconnectAt,
@@ -171,6 +178,11 @@ function createBaileysTransport({
             diagnostics: getDiagnostics(),
             inbox: getInboxStatus(),
         };
+    }
+
+    /** Ephemeral QR payload — runtime memory only; never log the raw value. */
+    function getQr() {
+        return lastQr;
     }
 
     async function teardownSocket() {
@@ -394,6 +406,31 @@ function createBaileysTransport({
                 captureLatencyMs: timing.captureLatencyMs,
             });
 
+            if (typeof onLiveInbound === 'function') {
+                try {
+                    onLiveInbound({
+                        providerMessageId: mapped.providerMessageId,
+                        externalContactKey: mapped.phone || mapped.normalized?.phone || null,
+                        fromMe: false,
+                        isGroup: Boolean(mapped.normalized?.isGroup),
+                        messageTimestamp: mapped.normalized?.messageTimestamp
+                            || msg.messageTimestamp
+                            || null,
+                        receivedAt: captureCompletedAt,
+                        upsertType: upsert?.type || 'notify',
+                        content: mapped.normalized?.text
+                            || mapped.normalized?.content
+                            || mapped.normalized
+                            || null,
+                        normalized: mapped.normalized,
+                    });
+                } catch (hookErr) {
+                    logger.error('[baileys] onLiveInbound_failed', {
+                        error: hookErr && hookErr.message ? hookErr.message : String(hookErr),
+                    });
+                }
+            }
+
             await worker.tick();
         }
     }
@@ -462,12 +499,16 @@ function createBaileysTransport({
             if (qr) {
                 ready = false;
                 qrRequired = true;
+                lastQr = qr;
                 logger.info('[baileys] QR required — scan with Linked devices on the salon phone');
                 qrcode.generate(qr, { small: true });
             }
             if (connection === 'open') {
                 ready = true;
                 qrRequired = false;
+                lastQr = null;
+                loggedOut = false;
+                lastDisconnectCode = null;
                 reconnectAttempts = 0;
                 lastError = null;
                 lastConnectedAt = new Date().toISOString();
@@ -478,11 +519,23 @@ function createBaileysTransport({
                 lastDisconnectAt = new Date().toISOString();
                 const err = lastDisconnect && lastDisconnect.error;
                 const statusCode = err && err.output && err.output.statusCode;
-                const loggedOut = statusCode === DisconnectReason.loggedOut;
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut
+                    || statusCode === 401;
+                lastDisconnectCode = statusCode != null ? statusCode : null;
                 lastError = (err && err.message) || `connection_closed:${statusCode}`;
-                logger.warn('[baileys] connection_closed', { statusCode, loggedOut });
+                logger.warn('[baileys] connection_closed', {
+                    statusCode,
+                    loggedOut: isLoggedOut,
+                });
 
-                if (!stopping && !loggedOut && sock === socket) {
+                if (isLoggedOut) {
+                    loggedOut = true;
+                    qrRequired = false;
+                    lastQr = null;
+                    clearReconnectTimer();
+                }
+
+                if (!stopping && !isLoggedOut && sock === socket) {
                     reconnectAttempts += 1;
                     const delay = Math.min(30_000, 1000 * reconnectAttempts);
                     clearReconnectTimer();
@@ -540,8 +593,10 @@ function createBaileysTransport({
 
     async function start() {
         listening = true;
-        worker.start();
-        await connect();
+        if (!loggedOut) {
+            worker.start();
+            await connect();
+        }
         return getStatus();
     }
 
@@ -556,6 +611,14 @@ function createBaileysTransport({
     }
 
     async function send(phone, message) {
+        if (loggedOut) {
+            return {
+                success: false,
+                status: 'failed',
+                error: 'WhatsApp session is logged out. Re-pair required.',
+                code: 'LOGGED_OUT',
+            };
+        }
         if (!sock || !ready) {
             return {
                 success: false,
@@ -645,6 +708,7 @@ function createBaileysTransport({
         send,
         isReady,
         getStatus,
+        getQr,
         getDiagnostics,
         getInboxStatus,
         connect,
