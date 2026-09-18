@@ -50,10 +50,22 @@ function getSendQueueMax() {
   return raw;
 }
 
+/** SaaS base URL for managed inbound delivery (no trailing slash). */
+function getDrvowaSaasBaseUrl() {
+  const raw = process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100';
+  return String(raw).trim().replace(/\/+$/, '') || 'http://127.0.0.1:3100';
+}
+
+function getDrvowaInboundUrl() {
+  return `${getDrvowaSaasBaseUrl()}/api/runtime/whatsapp/inbound`;
+}
+
 module.exports = {
   isMultiAccountEnabled,
   getRuntimeToken,
   verifyRuntimeBearer,
   getManagedAuthBaseDir,
   getSendQueueMax,
+  getDrvowaSaasBaseUrl,
+  getDrvowaInboundUrl,
 };

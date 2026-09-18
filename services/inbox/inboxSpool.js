@@ -140,7 +140,7 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
         return records.has(providerMessageId);
     }
 
-    function capture(normalizedEvent, { timing = null } = {}) {
+    function capture(normalizedEvent, { timing = null, drvowaDto = null } = {}) {
         if (!normalizedEvent || !normalizedEvent.providerMessageId) {
             throw new Error('capture requires normalizedEvent.providerMessageId');
         }
@@ -159,6 +159,9 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
             capturedAt: utcNow(),
             deliveredAt: null,
         };
+        if (drvowaDto && typeof drvowaDto === 'object') {
+            record.drvowaDto = drvowaDto;
+        }
 
         records.set(record.providerMessageId, record);
         const writeStarted = performance.now();
@@ -167,6 +170,18 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
             record.timing.spoolPersistedAt = utcNow();
             record.timing.spoolWriteMs = Math.round(performance.now() - writeStarted);
         }
+        return record;
+    }
+
+    /**
+     * Attach durable DRVOWA delivery payload after capture (managed accounts).
+     * Survives process restart; never required for legacy Cashier delivery.
+     */
+    function attachDrvowaPayload(providerMessageId, drvowaDto) {
+        const record = records.get(providerMessageId);
+        if (!record || !drvowaDto || typeof drvowaDto !== 'object') return null;
+        record.drvowaDto = drvowaDto;
+        persist();
         return record;
     }
 
@@ -267,6 +282,7 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
         hasProviderMessageId,
         getRecord,
         capture,
+        attachDrvowaPayload,
         updateTiming,
         markDelivered,
         markRetry,

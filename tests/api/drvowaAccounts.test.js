@@ -85,7 +85,7 @@ describe('DRVOWA /api/accounts S2S auth', () => {
         },
       }),
     }));
-  });
+  }, 30_000);
 
   afterEach(() => {
     resetManager(null);

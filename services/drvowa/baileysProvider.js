@@ -8,6 +8,9 @@ const { createInboxSpool } = require('../inbox/inboxSpool');
 const { getManagedAuthBaseDir } = require('./s2sAuth');
 const { buildDrvowaInboundDto } = require('./inboundDto');
 const { CONNECTION_STATES } = require('./connectionStates');
+const {
+  createDrvowaInboundDeliveryWorker,
+} = require('./drvowaInboundDeliveryWorker');
 
 function createNoopDeliveryWorker() {
   return {
@@ -32,6 +35,8 @@ function createBaileysProvider({
   onInboundDto = null,
   onLoggedOut = null,
   printQrToTerminal = false,
+  createDeliveryWorker = createDrvowaInboundDeliveryWorker,
+  fetchImpl = global.fetch,
 } = {}) {
   if (!accountKey) {
     throw new Error('accountKey is required');
@@ -57,11 +62,18 @@ function createBaileysProvider({
     spoolFile,
   });
 
+  const deliveryWorker = createDeliveryWorker({
+    accountKey,
+    spool,
+    logger,
+    fetchImpl,
+  });
+
   const transport = createTransport({
     authDir,
     lidMapFile,
     spool,
-    deliveryWorker: createNoopDeliveryWorker(),
+    deliveryWorker,
     outboundObservedPoster: {
       async observe() {
         return { skipped: true };
@@ -88,6 +100,17 @@ function createBaileysProvider({
         upsertType: event.upsertType,
         content: event.content,
       });
+
+      // Durable payload for restart-safe delivery (spool already captured).
+      if (event.providerMessageId && typeof spool.attachDrvowaPayload === 'function') {
+        spool.attachDrvowaPayload(event.providerMessageId, dto);
+      }
+
+      logger.info('[drvowa-inbound] captured', {
+        accountKey,
+        providerMessageId: event.providerMessageId || null,
+      });
+
       inboundEvents.push(dto);
       if (inboundEvents.length > 200) inboundEvents.shift();
       if (typeof onInboundDto === 'function') {
@@ -162,6 +185,7 @@ function createBaileysProvider({
   function getStatus() {
     const transportStatus = transport.getStatus();
     const state = deriveState();
+    const delivery = deliveryWorker.getStatus();
     return {
       accountKey,
       provider: 'baileys',
@@ -174,9 +198,21 @@ function createBaileysProvider({
         ? transportStatus.lastDisconnectCode
         : null,
       lastErrorCode: lastErrorCode
-        || (transportStatus.loggedOut ? 'LOGGED_OUT' : null),
+        || (transportStatus.loggedOut ? 'LOGGED_OUT' : null)
+        || delivery.lastErrorCode
+        || null,
       reconnectAttempts: transportStatus.reconnectAttempts || 0,
       authDir,
+      inboundDelivery: {
+        running: Boolean(delivery.running),
+        pending: delivery.pending ?? 0,
+        delivered: delivery.delivered ?? 0,
+        failed: delivery.failed ?? 0,
+        quarantined: delivery.quarantined ?? 0,
+        inFlight: Boolean(delivery.inFlight),
+        lastDeliveryAt: delivery.lastDeliveryAt || null,
+        lastErrorCode: delivery.lastErrorCode || null,
+      },
     };
   }
 
@@ -199,6 +235,8 @@ function createBaileysProvider({
     getQr,
     getInboundEvents,
     _transport: transport,
+    _spool: spool,
+    _deliveryWorker: deliveryWorker,
   };
 }
 

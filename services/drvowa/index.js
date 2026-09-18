@@ -53,4 +53,6 @@ module.exports = {
   startManagedAccountRecovery,
   createManagedAccountRegistry,
   recoverManagedAccounts,
+  createDrvowaInboundDeliveryWorker: require('./drvowaInboundDeliveryWorker')
+    .createDrvowaInboundDeliveryWorker,
 };
