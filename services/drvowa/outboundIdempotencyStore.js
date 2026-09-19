@@ -12,6 +12,8 @@ const STATES = Object.freeze({
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 2000;
 
+const CAPACITY_CODE = 'OUTBOUND_IDEMPOTENCY_CAPACITY';
+
 function utcNow() {
   return new Date().toISOString();
 }
@@ -30,6 +32,9 @@ function hashPayload({ phone, message }) {
 /**
  * Durable per-account outbound idempotency + API send correlation.
  * File: <authDir>/outbound-idempotency.json
+ *
+ * Hard invariant: unresolved SENDING entries are NEVER pruned by retention
+ * or maxEntries eviction. Capacity exhaustion fails closed before send.
  */
 function createOutboundIdempotencyStore({
   filePath,
@@ -73,30 +78,112 @@ function createOutboundIdempotencyStore({
     }
   }
 
+  function removeEntry(key) {
+    const entry = byKey.get(String(key));
+    if (!entry) return false;
+    byKey.delete(String(key));
+    if (entry.providerMessageId) {
+      byProviderMessageId.delete(String(entry.providerMessageId));
+    }
+    return true;
+  }
+
+  function listSentOldestFirst() {
+    return Array.from(byKey.values())
+      .filter((e) => e.state === STATES.SENT)
+      .sort(
+        (a, b) => Date.parse(a.updatedAt || a.createdAt || 0)
+          - Date.parse(b.updatedAt || b.createdAt || 0),
+      );
+  }
+
+  function countByState() {
+    let sending = 0;
+    let sent = 0;
+    for (const entry of byKey.values()) {
+      if (entry.state === STATES.SENDING) sending += 1;
+      else if (entry.state === STATES.SENT) sent += 1;
+    }
+    return { sending, sent };
+  }
+
+  /**
+   * Retention + soft capacity trim.
+   * - Retention deletes expired SENT only.
+   * - Capacity trim deletes oldest SENT only while size > maxEntries.
+   * - SENDING is never removed here.
+   * - Loaded stores may remain temporarily over maxEntries if only SENDING remains.
+   */
   function prune() {
     const now = Date.now();
     let changed = false;
+
+    const expiredSentKeys = [];
     for (const [key, entry] of byKey.entries()) {
+      if (entry.state !== STATES.SENT) continue;
       const ts = Date.parse(entry.updatedAt || entry.createdAt || '');
       if (Number.isFinite(ts) && now - ts > retentionMs) {
-        byKey.delete(key);
-        changed = true;
+        expiredSentKeys.push(key);
       }
     }
-    if (byKey.size > maxEntries) {
-      const sorted = Array.from(byKey.values()).sort(
-        (a, b) => Date.parse(a.updatedAt || a.createdAt) - Date.parse(b.updatedAt || b.createdAt),
-      );
-      const excess = byKey.size - maxEntries;
-      for (let i = 0; i < excess; i += 1) {
-        byKey.delete(sorted[i].idempotencyKey);
-        changed = true;
-      }
+    for (const key of expiredSentKeys) {
+      removeEntry(key);
+      changed = true;
     }
+
+    while (byKey.size > maxEntries) {
+      const oldestSent = listSentOldestFirst()[0];
+      if (!oldestSent) break;
+      removeEntry(oldestSent.idempotencyKey);
+      changed = true;
+    }
+
     if (changed) {
       rebuildProviderIndex();
       persist();
     }
+  }
+
+  /**
+   * Ensure one free slot for a NEW reservation.
+   * Evicts oldest SENT as needed. Never evicts SENDING.
+   * @returns {boolean} true if a new entry may be inserted
+   */
+  function ensureCapacityForNewReservation() {
+    const now = Date.now();
+    let changed = false;
+
+    const expiredSentKeys = [];
+    for (const [key, entry] of byKey.entries()) {
+      if (entry.state !== STATES.SENT) continue;
+      const ts = Date.parse(entry.updatedAt || entry.createdAt || '');
+      if (Number.isFinite(ts) && now - ts > retentionMs) {
+        expiredSentKeys.push(key);
+      }
+    }
+    for (const key of expiredSentKeys) {
+      removeEntry(key);
+      changed = true;
+    }
+
+    while (byKey.size >= maxEntries) {
+      const oldestSent = listSentOldestFirst()[0];
+      if (!oldestSent) {
+        if (changed) {
+          rebuildProviderIndex();
+          persist();
+        }
+        return false;
+      }
+      removeEntry(oldestSent.idempotencyKey);
+      changed = true;
+    }
+
+    if (changed) {
+      rebuildProviderIndex();
+      persist();
+    }
+    return true;
   }
 
   function load() {
@@ -122,9 +209,32 @@ function createOutboundIdempotencyStore({
   }
 
   function reserveSending({ idempotencyKey, phone, payloadHash }) {
+    const key = String(idempotencyKey);
+    const existing = byKey.get(key);
+    if (existing) {
+      const err = new Error(
+        existing.state === STATES.SENDING
+          ? 'Outbound idempotency key already has an unresolved SENDING reservation'
+          : 'Outbound idempotency key already exists',
+      );
+      err.code = 'OUTBOUND_IDEMPOTENCY_RESERVE_CONFLICT';
+      err.existingState = existing.state;
+      throw err;
+    }
+
+    if (!ensureCapacityForNewReservation()) {
+      const err = new Error(
+        'Outbound idempotency store is at capacity with unresolved SENDING reservations',
+      );
+      err.code = CAPACITY_CODE;
+      err.sendAttempted = false;
+      err.outcomeUnknown = false;
+      throw err;
+    }
+
     const now = utcNow();
     const entry = {
-      idempotencyKey: String(idempotencyKey),
+      idempotencyKey: key,
       state: STATES.SENDING,
       providerMessageId: null,
       phone: normalizePhoneForHash(phone),
@@ -152,10 +262,6 @@ function createOutboundIdempotencyStore({
     return entry;
   }
 
-  /**
-   * Clear a definitive pre-send failure reservation.
-   * Never clears SENT. Never use for ambiguous post-attempt failures.
-   */
   function clearSending(idempotencyKey) {
     const entry = byKey.get(String(idempotencyKey));
     if (!entry || entry.state !== STATES.SENDING) return false;
@@ -188,10 +294,6 @@ function createOutboundIdempotencyStore({
     return matches;
   }
 
-  /**
-   * Reconcile a SENDING reservation from a matching fromMe observation.
-   * Binds only when exactly one candidate matches phone + payloadHash.
-   */
   function reconcileSendingFromObservation({ phone, text, providerMessageId }) {
     const pid = providerMessageId ? String(providerMessageId) : '';
     if (!pid) {
@@ -231,7 +333,18 @@ function createOutboundIdempotencyStore({
     return byKey.size;
   }
 
-  /** Test/audit helper — must never include plaintext message bodies. */
+  function getStats() {
+    const { sending, sent } = countByState();
+    const total = byKey.size;
+    return {
+      total,
+      sending,
+      sent,
+      maxEntries,
+      saturated: total >= maxEntries && sent === 0,
+    };
+  }
+
   function dumpEntries() {
     return Array.from(byKey.values()).map((e) => ({ ...e }));
   }
@@ -251,7 +364,9 @@ function createOutboundIdempotencyStore({
     getByProviderMessageId,
     findSendingByPhoneAndHash,
     reconcileSendingFromObservation,
+    ensureCapacityForNewReservation,
     size,
+    getStats,
     prune,
     load,
     persist,
@@ -264,4 +379,5 @@ module.exports = {
   hashPayload,
   normalizePhoneForHash,
   STATES,
+  CAPACITY_CODE,
 };

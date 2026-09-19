@@ -179,11 +179,31 @@ async function sendManagedWithIdempotency({
     }
   }
 
-  store.reserveSending({
-    idempotencyKey,
-    phone: String(phone || ''),
-    payloadHash,
-  });
+  try {
+    store.reserveSending({
+      idempotencyKey,
+      phone: String(phone || ''),
+      payloadHash,
+    });
+  } catch (err) {
+    if (err && err.code === 'OUTBOUND_IDEMPOTENCY_CAPACITY') {
+      logOutbound(logger, 'capacity_rejected', {
+        accountKey,
+        idempotencyKey,
+      });
+      return {
+        success: false,
+        status: 'failed',
+        code: 'OUTBOUND_IDEMPOTENCY_CAPACITY',
+        error: 'Outbound idempotency store is at capacity with unresolved sends',
+        idempotencyKey,
+        sendAttempted: false,
+        outcomeUnknown: false,
+        httpStatus: 503,
+      };
+    }
+    throw err;
+  }
   logOutbound(logger, 'reserved', {
     accountKey,
     idempotencyKey,
