@@ -10,6 +10,8 @@ const require = createRequire(import.meta.url);
 const {
   createOutboundNumberSafety,
   STATES,
+  MINUTE_MS,
+  HOUR_MS,
 } = require('../../services/drvowa/outboundNumberSafety');
 const {
   createOutboundIdempotencyStore,
@@ -119,7 +121,6 @@ describe('outbound number safety (M5)', () => {
       sendFn: async () => ({ success: true, messageId: 'MID' }),
     });
     expect(guard.getStatus().minuteCount).toBe(1);
-    // At limit — NEW would fail, but duplicate must succeed without quota bump
     const dup = await sendManagedWithIdempotency({
       accountKey: 'wa_a',
       phone: '201555111111',
@@ -163,7 +164,6 @@ describe('outbound number safety (M5)', () => {
     guard.recordSend({ phone: '1', message: 'a' });
     guard.recordSend({ phone: '1', message: 'a2' });
     expect(guard.check({ phone: '1', message: 'b' }).allowed).toBe(false);
-    // Past cooldown and burst window so prior sends no longer count
     clock += 2000;
     expect(guard.check({ phone: '1', message: 'b' }).allowed).toBe(true);
     expect(guard.getStatus().state).not.toBe(STATES.COOLDOWN);
@@ -289,5 +289,151 @@ describe('outbound number safety (M5)', () => {
     expect(result.success).toBe(false);
     expect(guard.getStatus().minuteCount).toBe(0);
     expect(store.get('pre1')).toBeNull();
+  });
+
+  describe('time windows (fake clock)', () => {
+    it('A. after 2 minutes: minute=0 hour=1 day=1', () => {
+      const guard = safety({ perMinute: 100, perHour: 100, perDay: 100, burstLimit: 100 });
+      guard.recordAttempt({ phone: '201555111111', message: 'one' });
+      clock += 2 * MINUTE_MS;
+      const s = guard.getStatus();
+      expect(s.minuteCount).toBe(0);
+      expect(s.hourCount).toBe(1);
+      expect(s.dayCount).toBe(1);
+    });
+
+    it('B. after 2 hours: minute=0 hour=0 day=1', () => {
+      const guard = safety({ perMinute: 100, perHour: 100, perDay: 100, burstLimit: 100 });
+      guard.recordAttempt({ phone: '201555111111', message: 'one' });
+      clock += 2 * HOUR_MS;
+      const s = guard.getStatus();
+      expect(s.minuteCount).toBe(0);
+      expect(s.hourCount).toBe(0);
+      expect(s.dayCount).toBe(1);
+    });
+
+    it('C. after >24 hours: day=0', () => {
+      const guard = safety({ perMinute: 100, perHour: 100, perDay: 100, burstLimit: 100 });
+      guard.recordAttempt({ phone: '201555111111', message: 'one' });
+      clock += 25 * HOUR_MS;
+      const s = guard.getStatus();
+      expect(s.minuteCount).toBe(0);
+      expect(s.hourCount).toBe(0);
+      expect(s.dayCount).toBe(0);
+    });
+
+    it('D. perHour really blocks across minute boundaries', () => {
+      const guard = safety({
+        perMinute: 100,
+        perHour: 2,
+        perDay: 100,
+        burstLimit: 100,
+        cooldownMs: 60_000,
+      });
+
+      guard.recordAttempt({ phone: '201555000001', message: 'h1' });
+      clock += 2 * MINUTE_MS;
+      guard.recordAttempt({ phone: '201555000002', message: 'h2' });
+      clock += 2 * MINUTE_MS;
+      expect(guard.getStatus().minuteCount).toBe(0);
+      expect(guard.getStatus().hourCount).toBe(2);
+      const blocked = guard.check({ phone: '201555000003', message: 'h3' });
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.reason).toBe('rate_limit');
+    });
+
+    it('E. perDay really blocks across hours inside 24h', () => {
+      const guard = safety({
+        perMinute: 100,
+        perHour: 100,
+        perDay: 2,
+        burstLimit: 100,
+        cooldownMs: 60_000,
+      });
+      guard.recordAttempt({ phone: '201555000001', message: 'd1' });
+      clock += 3 * HOUR_MS;
+      guard.recordAttempt({ phone: '201555000002', message: 'd2' });
+      clock += 3 * HOUR_MS;
+      expect(guard.getStatus().hourCount).toBe(0);
+      expect(guard.getStatus().dayCount).toBe(2);
+      const blocked = guard.check({ phone: '201555000003', message: 'd3' });
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.reason).toBe('rate_limit');
+    });
+  });
+
+  describe('repeated content (content-only fingerprint)', () => {
+    it('F. same text across destinations hits repeated_content', () => {
+      const guard = safety({
+        repeatedContentLimit: 2,
+        perMinute: 100,
+        perHour: 100,
+        perDay: 100,
+        burstLimit: 100,
+        fanOutUniquePerHour: 100,
+        cautionCooldownMs: 5000,
+      });
+      guard.recordAttempt({ phone: '201555000001', message: 'promo text' });
+      guard.recordAttempt({ phone: '201555000002', message: 'promo text' });
+      const blocked = guard.check({ phone: '201555000003', message: 'promo text' });
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.reason).toBe('repeated_content');
+    });
+
+    it('G. different text to same phones does not trigger repeated_content', () => {
+      const guard = safety({
+        repeatedContentLimit: 2,
+        perMinute: 100,
+        perHour: 100,
+        perDay: 100,
+        burstLimit: 100,
+        fanOutUniquePerHour: 100,
+      });
+      guard.recordAttempt({ phone: '201555000001', message: 'alpha' });
+      guard.recordAttempt({ phone: '201555000001', message: 'beta' });
+      const ok = guard.check({ phone: '201555000001', message: 'gamma' });
+      expect(ok.allowed).toBe(true);
+      expect(ok.reason).toBe('ok');
+    });
+
+    it('H. stale content fingerprints cleaned after repeatedContentWindowMs', () => {
+      const windowMs = 10_000;
+      const guard = safety({
+        repeatedContentWindowMs: windowMs,
+        repeatedContentLimit: 50,
+        perMinute: 1000,
+        perHour: 1000,
+        perDay: 1000,
+        burstLimit: 1000,
+        fanOutUniquePerHour: 1000,
+      });
+      for (let i = 0; i < 8; i += 1) {
+        guard.recordAttempt({ phone: `20155500000${i}`, message: `unique-content-${i}` });
+      }
+      expect(guard.getInternalStats().contentFingerprintCount).toBe(8);
+      expect(guard.getStatus()).not.toHaveProperty('contentFingerprintCount');
+      const statusKeys = Object.keys(guard.getStatus());
+      expect(statusKeys).not.toContain('hashes');
+      expect(statusKeys).not.toContain('contentHashes');
+
+      clock += windowMs + 1;
+      guard.check({ phone: '201555999999', message: 'probe' });
+      expect(guard.getInternalStats().contentFingerprintCount).toBe(0);
+
+      // Destination map is retained for the hour fan-out window, then pruned.
+      clock += HOUR_MS;
+      guard.check({ phone: '201555999998', message: 'probe2' });
+      expect(guard.getInternalStats().destinationEntryCount).toBe(0);
+    });
+  });
+
+  it('getStatus never exposes hashes or plaintext', () => {
+    const guard = safety();
+    guard.recordAttempt({ phone: '201555111111', message: 'secret body' });
+    const status = guard.getStatus();
+    const blob = JSON.stringify(status);
+    expect(blob).not.toMatch(/secret body/);
+    expect(blob).not.toMatch(/201555111111/);
+    expect(status).not.toHaveProperty('contentFingerprintCount');
   });
 });

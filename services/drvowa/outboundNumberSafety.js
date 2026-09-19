@@ -9,6 +9,10 @@ const STATES = Object.freeze({
   PAUSED: 'PAUSED',
 });
 
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 const DEFAULTS = Object.freeze({
   perMinute: 20,
   perHour: 120,
@@ -26,11 +30,31 @@ function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
 
-function contentHash(phone, message) {
+/** Content-only fingerprint (no phone). Never log or expose this hash. */
+function contentHash(message) {
   return crypto
     .createHash('sha256')
-    .update(`${normalizePhone(phone)}\0${String(message || '')}`, 'utf8')
+    .update(String(message || ''), 'utf8')
     .digest('hex');
+}
+
+/**
+ * Count timestamps within windowMs of t without mutating the list.
+ * Assumes list is sorted ascending.
+ */
+function countWithin(list, windowMs, t) {
+  if (!list || !list.length) return 0;
+  let count = 0;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (t - list[i] > windowMs) break;
+    count += 1;
+  }
+  return count;
+}
+
+/** Destructively drop entries older than windowMs (oldest-first sorted lists). */
+function pruneList(list, windowMs, t) {
+  while (list.length && t - list[0] > windowMs) list.shift();
 }
 
 /**
@@ -52,18 +76,39 @@ function createOutboundNumberSafety({
   let paused = false;
   let state = STATES.NORMAL;
   let cooldownUntil = 0;
-  /** @type {number[]} */
+  /** @type {number[]} retained for DAY_MS */
   const sendTimestamps = [];
   /** @type {Map<string, number[]>} phone -> timestamps */
   const destTimestamps = new Map();
-  /** @type {Map<string, number[]>} hash -> timestamps */
+  /** @type {Map<string, number[]>} content-hash -> timestamps */
   const contentTimestamps = new Map();
 
-  function pruneList(list, windowMs, t) {
-    while (list.length && t - list[0] > windowMs) list.shift();
+  function pruneSendRetention(t) {
+    pruneList(sendTimestamps, DAY_MS, t);
+  }
+
+  function pruneDestinations(t) {
+    for (const [p, stamps] of destTimestamps.entries()) {
+      pruneList(stamps, HOUR_MS, t);
+      if (!stamps.length) destTimestamps.delete(p);
+    }
+  }
+
+  function pruneContentFingerprints(t) {
+    for (const [hash, stamps] of contentTimestamps.entries()) {
+      pruneList(stamps, cfg.repeatedContentWindowMs, t);
+      if (!stamps.length) contentTimestamps.delete(hash);
+    }
+  }
+
+  function pruneAll(t) {
+    pruneSendRetention(t);
+    pruneDestinations(t);
+    pruneContentFingerprints(t);
   }
 
   function refreshState(t) {
+    pruneAll(t);
     if (paused) {
       state = STATES.PAUSED;
       return;
@@ -72,21 +117,15 @@ function createOutboundNumberSafety({
       state = STATES.COOLDOWN;
       return;
     }
-    pruneList(sendTimestamps, 60 * 1000, t);
     const cautionMinute = Math.max(1, Math.floor(cfg.perMinute * 0.8));
     const cautionBurst = Math.max(1, Math.floor(cfg.burstLimit * 0.75));
-    if (sendTimestamps.length >= cautionMinute
-      || sendTimestamps.filter((x) => t - x <= cfg.burstWindowMs).length
-        >= cautionBurst) {
+    const minuteCount = countWithin(sendTimestamps, MINUTE_MS, t);
+    const burstCount = countWithin(sendTimestamps, cfg.burstWindowMs, t);
+    if (minuteCount >= cautionMinute || burstCount >= cautionBurst) {
       state = STATES.CAUTION;
       return;
     }
     state = STATES.NORMAL;
-  }
-
-  function countInWindow(list, windowMs, t) {
-    pruneList(list, windowMs, t);
-    return list.length;
   }
 
   function enterCooldown(t, ms) {
@@ -121,10 +160,10 @@ function createOutboundNumberSafety({
       };
     }
 
-    const minuteCount = countInWindow(sendTimestamps, 60 * 1000, t);
-    const hourCount = countInWindow(sendTimestamps, 60 * 60 * 1000, t);
-    const dayCount = countInWindow(sendTimestamps, 24 * 60 * 60 * 1000, t);
-    const burstCount = countInWindow(sendTimestamps, cfg.burstWindowMs, t);
+    const minuteCount = countWithin(sendTimestamps, MINUTE_MS, t);
+    const hourCount = countWithin(sendTimestamps, HOUR_MS, t);
+    const dayCount = countWithin(sendTimestamps, DAY_MS, t);
+    const burstCount = countWithin(sendTimestamps, cfg.burstWindowMs, t);
 
     if (minuteCount >= cfg.perMinute
       || hourCount >= cfg.perHour
@@ -142,14 +181,10 @@ function createOutboundNumberSafety({
 
     const dest = normalizePhone(phone);
     if (dest) {
-      const destList = destTimestamps.get(dest) || [];
-      pruneList(destList, 60 * 60 * 1000, t);
-      // Fan-out: count unique destinations touched this hour
+      // Fan-out: count unique destinations touched this hour (after pruneDestinations).
       let uniqueHour = 0;
-      for (const [p, stamps] of destTimestamps.entries()) {
-        pruneList(stamps, 60 * 60 * 1000, t);
-        if (stamps.length) uniqueHour += 1;
-        else destTimestamps.delete(p);
+      for (const stamps of destTimestamps.values()) {
+        if (countWithin(stamps, HOUR_MS, t) > 0) uniqueHour += 1;
       }
       if (!destTimestamps.has(dest) && uniqueHour >= cfg.fanOutUniquePerHour) {
         enterCooldown(t, cfg.cooldownMs);
@@ -163,10 +198,10 @@ function createOutboundNumberSafety({
       }
     }
 
-    const hash = contentHash(phone, message);
+    const hash = contentHash(message);
     const cList = contentTimestamps.get(hash) || [];
-    pruneList(cList, cfg.repeatedContentWindowMs, t);
-    if (cList.length >= cfg.repeatedContentLimit) {
+    const contentCount = countWithin(cList, cfg.repeatedContentWindowMs, t);
+    if (contentCount >= cfg.repeatedContentLimit) {
       enterCooldown(t, cfg.cautionCooldownMs);
       return {
         allowed: false,
@@ -190,7 +225,7 @@ function createOutboundNumberSafety({
       list.push(t);
       destTimestamps.set(dest, list);
     }
-    const hash = contentHash(phone, message);
+    const hash = contentHash(message);
     const cList = contentTimestamps.get(hash) || [];
     cList.push(t);
     contentTimestamps.set(hash, cList);
@@ -220,9 +255,23 @@ function createOutboundNumberSafety({
       accountKey,
       state,
       cooldownUntil: cooldownUntil > t ? new Date(cooldownUntil).toISOString() : null,
-      minuteCount: countInWindow(sendTimestamps, 60 * 1000, t),
-      hourCount: countInWindow(sendTimestamps, 60 * 60 * 1000, t),
-      dayCount: countInWindow(sendTimestamps, 24 * 60 * 60 * 1000, t),
+      minuteCount: countWithin(sendTimestamps, MINUTE_MS, t),
+      hourCount: countWithin(sendTimestamps, HOUR_MS, t),
+      dayCount: countWithin(sendTimestamps, DAY_MS, t),
+    };
+  }
+
+  /**
+   * Test-safe introspection: counts only, never hashes or plaintext.
+   * Not included in production getStatus().
+   */
+  function getInternalStats() {
+    const t = now();
+    pruneAll(t);
+    return {
+      sendTimestampCount: sendTimestamps.length,
+      destinationEntryCount: destTimestamps.size,
+      contentFingerprintCount: contentTimestamps.size,
     };
   }
 
@@ -234,6 +283,7 @@ function createOutboundNumberSafety({
     pause,
     resume,
     getStatus,
+    getInternalStats,
   };
 }
 
@@ -241,4 +291,8 @@ module.exports = {
   createOutboundNumberSafety,
   STATES,
   DEFAULTS,
+  countWithin,
+  MINUTE_MS,
+  HOUR_MS,
+  DAY_MS,
 };
