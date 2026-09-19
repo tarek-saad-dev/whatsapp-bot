@@ -46,6 +46,9 @@ function createOutboundObservationSpool({
   retentionMs = Number(
     process.env.DRVOWA_OUTBOUND_OBS_SPOOL_RETENTION_MS || DEFAULT_RETENTION_MS,
   ),
+  maxUnresolvedWarn = Number(
+    process.env.DRVOWA_OUTBOUND_OBS_UNRESOLVED_WARN || 200,
+  ),
 } = {}) {
   if (!spoolFile) {
     throw new Error('outbound observation spool requires spoolFile');
@@ -264,6 +267,20 @@ function createOutboundObservationSpool({
     return record;
   }
 
+  function markFailed(providerMessageId, error = null) {
+    const record = records.get(String(providerMessageId || ''));
+    if (!record) return null;
+    if (record.status === STATUS.UNRESOLVED || record.origin === ORIGIN.UNRESOLVED) {
+      return record;
+    }
+    record.attempts = (record.attempts || 0) + 1;
+    record.status = STATUS.FAILED;
+    record.lastError = error || null;
+    record.nextRetryAt = utcNow();
+    persist();
+    return record;
+  }
+
   function getPendingForDelivery(now = new Date()) {
     const ts = now.getTime();
     return Array.from(records.values())
@@ -297,14 +314,18 @@ function createOutboundObservationSpool({
         }
       } else pending += 1;
     }
+    const warnLimit = Number.isFinite(maxUnresolvedWarn) && maxUnresolvedWarn > 0
+      ? maxUnresolvedWarn
+      : 200;
     return {
       pending,
       unresolved,
       delivered,
       failed,
       total: records.size,
-      // Accumulation signal only — no silent deletion of UNRESOLVED in this phase.
       oldestUnresolvedCapturedAt,
+      unresolvedSaturated: unresolved >= warnLimit,
+      maxUnresolvedWarn: warnLimit,
     };
   }
 
@@ -322,6 +343,7 @@ function createOutboundObservationSpool({
     captureOrPromote,
     markDelivered,
     markRetry,
+    markFailed,
     getPendingForDelivery,
     getStats,
     get,
