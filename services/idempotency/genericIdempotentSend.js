@@ -165,7 +165,8 @@ async function sendGenericWithIdempotency({
         const msg = String((err && err.message) || '');
         const loggedOut = (err && err.code === 'LOGGED_OUT') || /logged out/i.test(msg);
         if (loggedOut) {
-            // Definitive: do not mark RETRYABLE_FAILED (that would auto-retry forever).
+            // Definitive pre-send failure: RETRYABLE_FAILED so the same key can
+            // be claimed again after the operator re-links WhatsApp.
             await recordSendOutcome({
                 idempotencyKey,
                 sendResult: {
@@ -175,7 +176,7 @@ async function sendGenericWithIdempotency({
                     error: 'WhatsApp session is logged out and must be linked again',
                 },
                 error: err,
-                preSendFailure: false,
+                preSendFailure: true,
                 store,
                 now,
             });
@@ -270,7 +271,7 @@ async function sendGenericWithIdempotency({
         await recordSendOutcome({
             idempotencyKey,
             sendResult,
-            preSendFailure: false,
+            preSendFailure: true,
             store,
             now,
         });
