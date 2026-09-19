@@ -163,6 +163,34 @@ async function sendGenericWithIdempotency({
         }
     } catch (err) {
         const msg = String((err && err.message) || '');
+        const loggedOut = (err && err.code === 'LOGGED_OUT') || /logged out/i.test(msg);
+        if (loggedOut) {
+            // Definitive: do not mark RETRYABLE_FAILED (that would auto-retry forever).
+            await recordSendOutcome({
+                idempotencyKey,
+                sendResult: {
+                    success: false,
+                    status: 'failed',
+                    code: 'LOGGED_OUT',
+                    error: 'WhatsApp session is logged out and must be linked again',
+                },
+                error: err,
+                preSendFailure: false,
+                store,
+                now,
+            });
+            return {
+                status: 503,
+                body: {
+                    ok: false,
+                    success: false,
+                    status: 'failed',
+                    phone: normalizedPhone,
+                    error: 'WhatsApp session is logged out and must be linked again',
+                    code: 'LOGGED_OUT',
+                },
+            };
+        }
         const preSend = /QR|not ready/i.test(msg);
         await recordSendOutcome({
             idempotencyKey,
@@ -234,6 +262,27 @@ async function sendGenericWithIdempotency({
                 phone: normalizedPhone,
                 error: sendResult.error || 'Phone number is not registered on WhatsApp',
                 code: CODES.RETRYABLE_FAILED,
+            },
+        };
+    }
+
+    if (sendResult && sendResult.code === 'LOGGED_OUT') {
+        await recordSendOutcome({
+            idempotencyKey,
+            sendResult,
+            preSendFailure: false,
+            store,
+            now,
+        });
+        return {
+            status: 503,
+            body: {
+                ok: false,
+                success: false,
+                status: 'failed',
+                phone: normalizedPhone,
+                error: sendResult.error || 'WhatsApp session is logged out and must be linked again',
+                code: 'LOGGED_OUT',
             },
         };
     }

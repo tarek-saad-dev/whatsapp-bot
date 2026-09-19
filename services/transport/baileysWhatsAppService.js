@@ -25,6 +25,27 @@ function chatIdFromPhone(phone) {
     return `${digits}@c.us`;
 }
 
+const LOGGED_OUT_ERROR = 'WhatsApp session is logged out and must be linked again';
+
+function isTransportLoggedOut() {
+    try {
+        const status = transport.getStatus();
+        return Boolean(status && status.loggedOut === true);
+    } catch (_) {
+        return false;
+    }
+}
+
+function loggedOutFailure(phone) {
+    return {
+        success: false,
+        status: 'failed',
+        code: 'LOGGED_OUT',
+        error: LOGGED_OUT_ERROR,
+        phone: phone != null ? formatPhoneNumber(phone) : undefined,
+    };
+}
+
 async function sendMessageAndWait(phone, message, timeout = 120000, meta = {}) {
     const logCtx = meta.logContext || {};
     const typePrefix = logCtx.type || 'message';
@@ -33,8 +54,19 @@ async function sendMessageAndWait(phone, message, timeout = 120000, meta = {}) {
     );
 
     return sendQueue.enqueue(async () => {
+        // Hard stop: never reconnect/create sockets after a definitive 401 logout.
+        if (isTransportLoggedOut()) {
+            console.warn(`[whatsapp/baileys] ${typePrefix} rejected LOGGED_OUT phone=${maskPhone(phone)}`);
+            return loggedOutFailure(phone);
+        }
+
         const start = Date.now();
         while (Date.now() - start < timeout) {
+            if (isTransportLoggedOut()) {
+                console.warn(`[whatsapp/baileys] ${typePrefix} rejected LOGGED_OUT phone=${maskPhone(phone)}`);
+                return loggedOutFailure(phone);
+            }
+
             if (!transport.isReady()) {
                 if (!transport.getStatus().qrRequired) {
                     try {
@@ -58,6 +90,9 @@ async function sendMessageAndWait(phone, message, timeout = 120000, meta = {}) {
                     chatId: result.chatId || chatIdFromPhone(phone),
                 };
             }
+            if (result && result.code === 'LOGGED_OUT') {
+                return loggedOutFailure(phone);
+            }
             if (Date.now() - start >= timeout) {
                 return {
                     success: false,
@@ -78,6 +113,9 @@ async function sendMessageAndWait(phone, message, timeout = 120000, meta = {}) {
 }
 
 async function sendMessage(phone, message) {
+    if (isTransportLoggedOut()) {
+        return loggedOutFailure(phone);
+    }
     if (transport.isReady()) {
         sendQueue.enqueue(() => transport.send(phone, message)).catch((error) => {
             console.log(`⚠️ Baileys send failed for ${maskPhone(phone)}:`, error.message);
@@ -119,6 +157,11 @@ async function initializeDriver() {
 }
 
 async function getOrCreateDriver() {
+    if (isTransportLoggedOut()) {
+        const err = new Error(LOGGED_OUT_ERROR);
+        err.code = 'LOGGED_OUT';
+        throw err;
+    }
     if (!transport.isReady()) {
         await transport.start();
     }
