@@ -294,6 +294,23 @@ function createOutboundIdempotencyStore({
     return matches;
   }
 
+  function hasSendingForPhone(phone) {
+    const normalized = normalizePhoneForHash(phone);
+    if (!normalized) return false;
+    for (const entry of byKey.values()) {
+      if (entry.state !== STATES.SENDING) continue;
+      if (normalizePhoneForHash(entry.phone) === normalized) return true;
+    }
+    return false;
+  }
+
+  function hasAnySending() {
+    for (const entry of byKey.values()) {
+      if (entry.state === STATES.SENDING) return true;
+    }
+    return false;
+  }
+
   function reconcileSendingFromObservation({ phone, text, providerMessageId }) {
     const pid = providerMessageId ? String(providerMessageId) : '';
     if (!pid) {
@@ -363,6 +380,8 @@ function createOutboundIdempotencyStore({
     isApiOrigin,
     getByProviderMessageId,
     findSendingByPhoneAndHash,
+    hasSendingForPhone,
+    hasAnySending,
     reconcileSendingFromObservation,
     ensureCapacityForNewReservation,
     size,

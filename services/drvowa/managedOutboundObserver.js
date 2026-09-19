@@ -1,9 +1,10 @@
 'use strict';
 
 /**
- * Managed fromMe observation → classify API vs human → durable spool.
+ * Managed fromMe observation → classify API / human / unresolved → durable spool.
  * Replaces the noop outboundObservedPoster for managed accounts only.
- * Reconciles matching SENDING reservations before classification.
+ *
+ * UNRESOLVED is runtime-only: held locally, never POSTed to SaaS (no HUMAN_PAUSED).
  */
 function createManagedOutboundObserver({
   accountKey,
@@ -16,6 +17,88 @@ function createManagedOutboundObserver({
     throw new Error('accountKey is required for managed outbound observer');
   }
 
+  function logInfo(event, fields) {
+    (logger.info || console.log).bind(logger)(`[drvowa-outbound] ${event}`, fields);
+  }
+
+  function logWarn(event, fields) {
+    (logger.warn || logger.info || console.warn).bind(logger)(
+      `[drvowa-outbound] ${event}`,
+      fields,
+    );
+  }
+
+  /**
+   * Positive-evidence classification.
+   * Ambiguity / insufficient evidence → UNRESOLVED (never HUMAN_MANUAL).
+   */
+  function classifyOrigin({ providerMessageId, phone, text }) {
+    if (idempotencyStore && idempotencyStore.isApiOrigin(providerMessageId)) {
+      return { origin: 'DRVOWA_API', reason: 'provider_correlated' };
+    }
+
+    const hasPhoneSending = Boolean(
+      phone
+      && idempotencyStore
+      && typeof idempotencyStore.hasSendingForPhone === 'function'
+      && idempotencyStore.hasSendingForPhone(phone),
+    );
+
+    if (
+      idempotencyStore
+      && typeof idempotencyStore.reconcileSendingFromObservation === 'function'
+      && phone
+      && text != null
+    ) {
+      const recon = idempotencyStore.reconcileSendingFromObservation({
+        phone,
+        text,
+        providerMessageId,
+      });
+      if (recon.reconciled) {
+        logInfo('reconciled_from_observation', {
+          accountKey,
+          idempotencyKey: recon.idempotencyKey || null,
+          providerMessageId,
+        });
+        return {
+          origin: 'DRVOWA_API',
+          reason: 'reconciled',
+          idempotencyKey: recon.idempotencyKey || null,
+        };
+      }
+      if (recon.reason === 'ambiguous_match') {
+        return { origin: 'UNRESOLVED', reason: 'ambiguous_match', matchCount: recon.matchCount };
+      }
+      // Exact hash no_match but unresolved SENDING for this phone → ambiguous.
+      if (hasPhoneSending) {
+        return { origin: 'UNRESOLVED', reason: 'sending_phone_text_mismatch' };
+      }
+      return { origin: 'HUMAN_MANUAL', reason: 'no_api_possibility' };
+    }
+
+    // Null/missing text with SENDING for phone → cannot safely hash-match.
+    if (phone && text == null && hasPhoneSending) {
+      return { origin: 'UNRESOLVED', reason: 'sending_phone_null_text' };
+    }
+
+    // Insufficient destination identity while any SENDING exists → fail closed.
+    if (
+      !phone
+      && idempotencyStore
+      && typeof idempotencyStore.hasAnySending === 'function'
+      && idempotencyStore.hasAnySending()
+    ) {
+      return { origin: 'UNRESOLVED', reason: 'insufficient_identity' };
+    }
+
+    if (phone && !hasPhoneSending) {
+      return { origin: 'HUMAN_MANUAL', reason: 'no_sending_for_phone' };
+    }
+
+    return { origin: 'HUMAN_MANUAL', reason: 'no_api_possibility' };
+  }
+
   async function observe(payload) {
     try {
       const providerMessageId = String(payload?.providerMessageId || '').trim();
@@ -23,86 +106,95 @@ function createManagedOutboundObserver({
         return { skipped: true, reason: 'missing_provider_message_id' };
       }
 
-      let origin = idempotencyStore && idempotencyStore.isApiOrigin(providerMessageId)
-        ? 'DRVOWA_API'
-        : 'HUMAN_MANUAL';
-
       const phone = payload.phone || null;
       const text = payload.text != null ? String(payload.text) : null;
-
-      if (
-        origin !== 'DRVOWA_API'
-        && idempotencyStore
-        && typeof idempotencyStore.reconcileSendingFromObservation === 'function'
-        && phone
-        && text != null
-      ) {
-        const recon = idempotencyStore.reconcileSendingFromObservation({
-          phone,
-          text,
-          providerMessageId,
-        });
-        if (recon.reconciled) {
-          origin = 'DRVOWA_API';
-          (logger.info || console.log).bind(logger)(
-            '[drvowa-outbound] reconciled_from_observation',
-            {
-              accountKey,
-              idempotencyKey: recon.idempotencyKey || null,
-              providerMessageId,
-            },
-          );
-        }
-      } else if (
-        origin !== 'DRVOWA_API'
-        && idempotencyStore
-        && typeof idempotencyStore.reconcileSendingFromObservation === 'function'
-        && phone
-        && text == null
-      ) {
-        // Without text we cannot safely hash-match; leave HUMAN_MANUAL.
-      }
+      const classified = classifyOrigin({ providerMessageId, phone, text });
 
       const externalContactKey = phone
         ? `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`
         : (payload?.rawPayload?.resolvedCustomerJid || null);
 
-      const { record, duplicate } = observationSpool.capture({
+      const captureFn = typeof observationSpool.captureOrPromote === 'function'
+        ? observationSpool.captureOrPromote.bind(observationSpool)
+        : observationSpool.capture.bind(observationSpool);
+
+      const {
+        record,
+        duplicate,
+        promoted = false,
+        conflict = false,
+      } = captureFn({
         accountKey,
         providerMessageId,
-        origin,
+        origin: classified.origin,
         phone,
         externalContactKey,
         occurredAt: payload.occurredAt || new Date().toISOString(),
       });
 
-      const event = origin === 'DRVOWA_API' ? 'observed_api' : 'observed_human';
-      (logger.info || console.log).bind(logger)(`[drvowa-outbound] ${event}`, {
-        accountKey,
-        providerMessageId,
-        origin,
-      });
+      // Return the durable stored origin (never a conflicting guess).
+      const storedOrigin = record.origin;
 
-      if (!duplicate) {
-        (logger.info || console.log).bind(logger)('[drvowa-outbound] observation_queued', {
+      if (conflict) {
+        logWarn('observation_origin_conflict', {
           accountKey,
           providerMessageId,
-          origin,
+          storedOrigin,
+          proposedOrigin: classified.origin,
+        });
+      }
+
+      if (promoted) {
+        logInfo('observation_promoted', {
+          accountKey,
+          providerMessageId,
+          origin: storedOrigin,
+        });
+      }
+
+      const event = storedOrigin === 'DRVOWA_API'
+        ? 'observed_api'
+        : storedOrigin === 'UNRESOLVED'
+          ? 'observed_unresolved'
+          : 'observed_human';
+      logInfo(event, {
+        accountKey,
+        providerMessageId,
+        origin: storedOrigin,
+        reason: classified.reason,
+      });
+
+      const deliveryEligible = storedOrigin === 'DRVOWA_API'
+        || storedOrigin === 'HUMAN_MANUAL';
+
+      if ((!duplicate || promoted) && deliveryEligible) {
+        logInfo('observation_queued', {
+          accountKey,
+          providerMessageId,
+          origin: storedOrigin,
         });
         if (observationWorker && typeof observationWorker.kick === 'function') {
           observationWorker.kick();
         }
+      } else if (!duplicate && storedOrigin === 'UNRESOLVED') {
+        logInfo('observation_held_unresolved', {
+          accountKey,
+          providerMessageId,
+        });
       }
 
-      return { ok: true, origin, duplicate: Boolean(duplicate), record };
+      return {
+        ok: true,
+        origin: storedOrigin,
+        duplicate: Boolean(duplicate),
+        promoted: Boolean(promoted),
+        record,
+      };
     } catch (err) {
-      (logger.warn || logger.info || console.warn).bind(logger)(
-        '[drvowa-outbound] observe_error',
-        {
-          accountKey,
-          code: err && err.code ? err.code : 'OBSERVE_FAILED',
-        },
-      );
+      logWarn('observe_error', {
+        accountKey,
+        code: err && err.code ? err.code : 'OBSERVE_FAILED',
+      });
       return { ok: false, reason: err && err.message ? err.message : String(err) };
     }
   }
@@ -118,6 +210,7 @@ function createManagedOutboundObserver({
   return {
     observe,
     getStatus,
+    classifyOrigin,
   };
 }
 

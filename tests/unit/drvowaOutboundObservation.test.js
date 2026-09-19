@@ -214,7 +214,7 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
     expect(sendFn).not.toHaveBeenCalled();
   });
 
-  it('2A.1-10. nonmatching fromMe remains HUMAN_MANUAL', async () => {
+  it('2A.1-10. same-phone text mismatch is UNRESOLVED (not HUMAN_MANUAL)', async () => {
     const { hashPayload, STATES } = require('../../services/drvowa/outboundIdempotencyStore');
     const idem = createOutboundIdempotencyStore({
       filePath: path.join(tmpDir, 'outbound-idempotency.json'),
@@ -239,12 +239,14 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
       text: 'totally different human text',
       occurredAt: new Date().toISOString(),
     });
-    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(result.origin).toBe('UNRESOLVED');
+    expect(spool.getStats().unresolved).toBe(1);
+    expect(spool.getPendingForDelivery()).toHaveLength(0);
     expect(idem.get('key-other').state).toBe(STATES.SENDING);
     expect(idem.isApiOrigin('HUMAN-OTHER')).toBe(false);
   });
 
-  it('2A.1-11. ambiguous multiple candidate match never binds wrong key', async () => {
+  it('2A.1-11. ambiguous multiple candidate match is UNRESOLVED and never binds', async () => {
     const { hashPayload, STATES } = require('../../services/drvowa/outboundIdempotencyStore');
     const idem = createOutboundIdempotencyStore({
       filePath: path.join(tmpDir, 'outbound-idempotency.json'),
@@ -270,10 +272,11 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
       text: message,
       occurredAt: new Date().toISOString(),
     });
-    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(result.origin).toBe('UNRESOLVED');
     expect(idem.get('key-a').state).toBe(STATES.SENDING);
     expect(idem.get('key-b').state).toBe(STATES.SENDING);
     expect(idem.isApiOrigin('MULTI-1')).toBe(false);
+    expect(spool.getPendingForDelivery()).toHaveLength(0);
   });
 });
 

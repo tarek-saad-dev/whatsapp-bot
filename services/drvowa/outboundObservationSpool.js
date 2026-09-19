@@ -5,8 +5,15 @@ const path = require('path');
 
 const STATUS = Object.freeze({
   PENDING: 'pending_delivery',
+  UNRESOLVED: 'unresolved',
   DELIVERED: 'delivered',
   FAILED: 'failed',
+});
+
+const ORIGIN = Object.freeze({
+  DRVOWA_API: 'DRVOWA_API',
+  HUMAN_MANUAL: 'HUMAN_MANUAL',
+  UNRESOLVED: 'UNRESOLVED',
 });
 
 const DEFAULT_MAX_DELIVERED = 500;
@@ -16,9 +23,22 @@ function utcNow() {
   return new Date().toISOString();
 }
 
+function normalizeOrigin(origin) {
+  if (origin === ORIGIN.DRVOWA_API) return ORIGIN.DRVOWA_API;
+  if (origin === ORIGIN.UNRESOLVED) return ORIGIN.UNRESOLVED;
+  return ORIGIN.HUMAN_MANUAL;
+}
+
+function statusForOrigin(origin) {
+  if (origin === ORIGIN.UNRESOLVED) return STATUS.UNRESOLVED;
+  return STATUS.PENDING;
+}
+
 /**
  * Durable managed outbound observation spool (API vs human fromMe).
  * Separate from inbound inbox-spool.json.
+ *
+ * UNRESOLVED is a local hold only — never delivery-eligible / never POSTed to SaaS.
  */
 function createOutboundObservationSpool({
   spoolFile,
@@ -84,6 +104,10 @@ function createOutboundObservationSpool({
       const parsed = JSON.parse(fs.readFileSync(spoolFile, 'utf8'));
       for (const item of parsed.records || []) {
         if (item && item.providerMessageId) {
+          // Normalize legacy records that may lack UNRESOLVED status.
+          if (item.origin === ORIGIN.UNRESOLVED && item.status === STATUS.PENDING) {
+            item.status = STATUS.UNRESOLVED;
+          }
           records.set(item.providerMessageId, item);
         }
       }
@@ -93,19 +117,12 @@ function createOutboundObservationSpool({
     }
   }
 
-  function capture(observation) {
-    const providerMessageId = String(observation?.providerMessageId || '').trim();
-    if (!providerMessageId) {
-      throw new Error('capture requires providerMessageId');
-    }
-    if (records.has(providerMessageId)) {
-      return { record: records.get(providerMessageId), duplicate: true };
-    }
-    const record = {
-      providerMessageId,
+  function buildRecord(observation, origin) {
+    return {
+      providerMessageId: String(observation.providerMessageId).trim(),
       accountKey: String(observation.accountKey || ''),
-      status: STATUS.PENDING,
-      origin: observation.origin === 'DRVOWA_API' ? 'DRVOWA_API' : 'HUMAN_MANUAL',
+      status: statusForOrigin(origin),
+      origin,
       phone: observation.phone || null,
       externalContactKey: observation.externalContactKey || null,
       occurredAt: observation.occurredAt || utcNow(),
@@ -115,9 +132,87 @@ function createOutboundObservationSpool({
       capturedAt: utcNow(),
       deliveredAt: null,
     };
-    records.set(providerMessageId, record);
-    persist();
-    return { record, duplicate: false };
+  }
+
+  /**
+   * Capture or promote by providerMessageId.
+   * Decisive DRVOWA_API may promote UNRESOLVED → delivery-eligible.
+   * Decisive origins never downgrade. HUMAN never silently flips.
+   */
+  function captureOrPromote(observation) {
+    const providerMessageId = String(observation?.providerMessageId || '').trim();
+    if (!providerMessageId) {
+      throw new Error('capture requires providerMessageId');
+    }
+    const proposed = normalizeOrigin(observation.origin);
+    const existing = records.get(providerMessageId);
+
+    if (!existing) {
+      const record = buildRecord({ ...observation, providerMessageId }, proposed);
+      records.set(providerMessageId, record);
+      persist();
+      return {
+        record,
+        duplicate: false,
+        promoted: false,
+        conflict: false,
+      };
+    }
+
+    // Already decisive API — never downgrade.
+    if (existing.origin === ORIGIN.DRVOWA_API) {
+      return {
+        record: existing,
+        duplicate: true,
+        promoted: false,
+        conflict: proposed !== ORIGIN.DRVOWA_API,
+      };
+    }
+
+    // Promote held UNRESOLVED → decisive API.
+    if (
+      proposed === ORIGIN.DRVOWA_API
+      && (existing.origin === ORIGIN.UNRESOLVED || existing.status === STATUS.UNRESOLVED)
+    ) {
+      existing.origin = ORIGIN.DRVOWA_API;
+      existing.status = STATUS.PENDING;
+      existing.nextRetryAt = utcNow();
+      existing.lastError = null;
+      if (observation.phone && !existing.phone) existing.phone = observation.phone;
+      if (observation.externalContactKey && !existing.externalContactKey) {
+        existing.externalContactKey = observation.externalContactKey;
+      }
+      if (observation.occurredAt) existing.occurredAt = observation.occurredAt;
+      persist();
+      return {
+        record: existing,
+        duplicate: true,
+        promoted: true,
+        conflict: false,
+      };
+    }
+
+    // Already decisive HUMAN — do not silently flip.
+    if (existing.origin === ORIGIN.HUMAN_MANUAL) {
+      return {
+        record: existing,
+        duplicate: true,
+        promoted: false,
+        conflict: proposed !== ORIGIN.HUMAN_MANUAL,
+      };
+    }
+
+    // Existing UNRESOLVED + non-API proposal: keep held.
+    return {
+      record: existing,
+      duplicate: true,
+      promoted: false,
+      conflict: false,
+    };
+  }
+
+  function capture(observation) {
+    return captureOrPromote(observation);
   }
 
   function markDelivered(providerMessageId) {
@@ -134,6 +229,10 @@ function createOutboundObservationSpool({
   function markRetry(providerMessageId, { nextRetryAt, error } = {}) {
     const record = records.get(providerMessageId);
     if (!record) return null;
+    // Never move UNRESOLVED holds into delivery via retry.
+    if (record.status === STATUS.UNRESOLVED || record.origin === ORIGIN.UNRESOLVED) {
+      return record;
+    }
     record.attempts += 1;
     record.lastError = error || null;
     record.nextRetryAt = nextRetryAt || utcNow();
@@ -146,32 +245,46 @@ function createOutboundObservationSpool({
     const ts = now.getTime();
     return Array.from(records.values())
       .filter((r) => r.status === STATUS.PENDING)
+      .filter((r) => r.origin === ORIGIN.DRVOWA_API || r.origin === ORIGIN.HUMAN_MANUAL)
       .filter((r) => new Date(r.nextRetryAt).getTime() <= ts)
       .sort((a, b) => new Date(a.capturedAt) - new Date(b.capturedAt));
   }
 
   function getStats() {
     let pending = 0;
+    let unresolved = 0;
     let delivered = 0;
     let failed = 0;
     for (const record of records.values()) {
       if (record.status === STATUS.DELIVERED) delivered += 1;
       else if (record.status === STATUS.FAILED) failed += 1;
-      else pending += 1;
+      else if (
+        record.status === STATUS.UNRESOLVED
+        || record.origin === ORIGIN.UNRESOLVED
+      ) {
+        unresolved += 1;
+      } else pending += 1;
     }
-    return { pending, delivered, failed, total: records.size };
+    return { pending, unresolved, delivered, failed, total: records.size };
+  }
+
+  function get(providerMessageId) {
+    return records.get(String(providerMessageId || '')) || null;
   }
 
   load();
 
   return {
     STATUS,
+    ORIGIN,
     spoolFile,
     capture,
+    captureOrPromote,
     markDelivered,
     markRetry,
     getPendingForDelivery,
     getStats,
+    get,
     load,
     persist,
     cleanupDelivered,
@@ -181,4 +294,5 @@ function createOutboundObservationSpool({
 module.exports = {
   createOutboundObservationSpool,
   STATUS,
+  ORIGIN,
 };

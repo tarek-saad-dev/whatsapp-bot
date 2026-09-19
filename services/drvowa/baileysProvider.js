@@ -268,6 +268,7 @@ function createBaileysProvider({
         running: Boolean(outboundObs.running),
         deliveryEnabled: Boolean(outboundObs.deliveryEnabled),
         pending: outboundObs.pending ?? 0,
+        unresolved: outboundObs.unresolved ?? 0,
         delivered: outboundObs.delivered ?? 0,
         fetchAttempts: outboundObs.fetchAttempts ?? 0,
         lastErrorCode: outboundObs.lastErrorCode || null,

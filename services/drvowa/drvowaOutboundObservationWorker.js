@@ -146,6 +146,7 @@ function createDrvowaOutboundObservationWorker({
       running,
       deliveryEnabled: deliveryEnabled(),
       pending: stats.pending,
+      unresolved: stats.unresolved || 0,
       delivered: stats.delivered,
       failed: stats.failed,
       inFlight,
