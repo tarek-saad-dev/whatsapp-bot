@@ -178,4 +178,116 @@ describe('outbound number safety (M5)', () => {
     expect(blocked.allowed).toBe(false);
     expect(blocked.reason).toBe('repeated_content');
   });
+
+  it('successful send counts exposure once', async () => {
+    const guard = safety({ perMinute: 100, burstLimit: 100 });
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'idem-ok.json'),
+    });
+    await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'ok',
+      idempotencyKey: 'ok1',
+      store,
+      numberSafety: guard,
+      sendFn: async () => ({ success: true, messageId: 'MID-OK' }),
+    });
+    expect(guard.getStatus().minuteCount).toBe(1);
+  });
+
+  it('ambiguous send counts exposure once', async () => {
+    const guard = safety({ perMinute: 100, burstLimit: 100 });
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'idem-amb.json'),
+    });
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'amb',
+      idempotencyKey: 'amb1',
+      store,
+      numberSafety: guard,
+      sendFn: async () => ({
+        success: false,
+        sendAttempted: true,
+        outcomeUnknown: true,
+        code: 'OUTBOUND_RESULT_UNKNOWN',
+        error: 'timeout after send',
+      }),
+    });
+    expect(result.code).toBe('OUTBOUND_RESULT_UNKNOWN');
+    expect(guard.getStatus().minuteCount).toBe(1);
+  });
+
+  it('SENDING retry does not add exposure', async () => {
+    const guard = safety({ perMinute: 100, burstLimit: 100 });
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'idem-sending.json'),
+    });
+    store.reserveSending({
+      idempotencyKey: 'stuck2',
+      phone: '201555111111',
+      payloadHash: hashPayload({ phone: '201555111111', message: 'x' }),
+    });
+    const before = guard.getStatus().minuteCount;
+    await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'x',
+      idempotencyKey: 'stuck2',
+      store,
+      numberSafety: guard,
+      sendFn: async () => ({ success: true, messageId: 'NO' }),
+    });
+    expect(guard.getStatus().minuteCount).toBe(before);
+  });
+
+  it('number-safety rejection does not call transport or count', async () => {
+    const guard = safety({ burstLimit: 1 });
+    guard.recordAttempt({ phone: '201555111111', message: 'fill' });
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'idem-rej.json'),
+    });
+    let sendCalls = 0;
+    const blocked = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'blocked',
+      idempotencyKey: 'rej1',
+      store,
+      numberSafety: guard,
+      sendFn: async () => {
+        sendCalls += 1;
+        return { success: true, messageId: 'NO' };
+      },
+    });
+    expect(blocked.code).toBe('OUTBOUND_NUMBER_SAFETY');
+    expect(sendCalls).toBe(0);
+    expect(guard.getStatus().minuteCount).toBe(1);
+  });
+
+  it('sendAttempted:false from sendFn does not count exposure', async () => {
+    const guard = safety({ perMinute: 100, burstLimit: 100 });
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'idem-presend.json'),
+    });
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'pre',
+      idempotencyKey: 'pre1',
+      store,
+      numberSafety: guard,
+      sendFn: async () => ({
+        success: false,
+        sendAttempted: false,
+        code: 'NOT_READY',
+        error: 'not ready',
+      }),
+    });
+    expect(result.success).toBe(false);
+    expect(guard.getStatus().minuteCount).toBe(0);
+    expect(store.get('pre1')).toBeNull();
+  });
 });

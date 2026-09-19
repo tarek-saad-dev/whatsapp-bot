@@ -235,14 +235,30 @@ async function sendManagedWithIdempotency({
 
   const started = Date.now();
   let result;
+  let exposureRecorded = false;
+
+  function recordTransportExposureOnce() {
+    if (exposureRecorded) return;
+    exposureRecorded = true;
+    if (!numberSafety) return;
+    if (typeof numberSafety.recordAttempt === 'function') {
+      numberSafety.recordAttempt({ phone, message });
+    } else if (typeof numberSafety.recordSend === 'function') {
+      numberSafety.recordSend({ phone, message });
+    }
+  }
+
   try {
     result = await sendFn(phone, message);
   } catch (err) {
     // Unexpected throw: preserve SENDING unless caller marked definitive pre-send.
     if (err && err.sendAttempted === false) {
+      // Definitive pre-transport failure — do not consume safety quota.
       store.clearSending(idempotencyKey);
       throw err;
     }
+    // Ambiguous: transport may have reached WhatsApp — count exposure once.
+    recordTransportExposureOnce();
     logOutbound(logger, 'ambiguous_preserved', {
       accountKey,
       idempotencyKey,
@@ -259,6 +275,7 @@ async function sendManagedWithIdempotency({
 
   if (!result || !result.success) {
     if (isAmbiguousSendResult(result)) {
+      recordTransportExposureOnce();
       logOutbound(logger, 'ambiguous_preserved', {
         accountKey,
         idempotencyKey,
@@ -275,6 +292,7 @@ async function sendManagedWithIdempotency({
     }
 
     if (isDefinitivePreSendFailure(result)) {
+      // sendFn reported sendAttempted:false — no WhatsApp exposure, no quota.
       store.clearSending(idempotencyKey);
       return {
         ...(result || {
@@ -289,6 +307,7 @@ async function sendManagedWithIdempotency({
     }
 
     // Unclassified failure after reservation: preserve (never auto-resend).
+    recordTransportExposureOnce();
     logOutbound(logger, 'ambiguous_preserved', {
       accountKey,
       idempotencyKey,
@@ -306,6 +325,7 @@ async function sendManagedWithIdempotency({
 
   const messageId = result.messageId || null;
   if (!messageId) {
+    recordTransportExposureOnce();
     logOutbound(logger, 'ambiguous_preserved', {
       accountKey,
       idempotencyKey,
@@ -320,10 +340,8 @@ async function sendManagedWithIdempotency({
     };
   }
 
+  recordTransportExposureOnce();
   store.markSent({ idempotencyKey, providerMessageId: messageId });
-  if (numberSafety && typeof numberSafety.recordSend === 'function') {
-    numberSafety.recordSend({ phone, message });
-  }
   logOutbound(logger, 'sent', {
     accountKey,
     idempotencyKey,

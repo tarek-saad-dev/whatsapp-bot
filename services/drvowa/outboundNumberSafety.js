@@ -180,8 +180,8 @@ function createOutboundNumberSafety({
     return { allowed: true, state, reason: 'ok' };
   }
 
-  /** Record a successful NEW send admission (call after check allows). */
-  function recordSend({ phone, message } = {}) {
+  /** Record a NEW transport send exposure (call once per sendFn invocation). */
+  function recordAttempt({ phone, message } = {}) {
     const t = now();
     sendTimestamps.push(t);
     const dest = normalizePhone(phone);
@@ -195,6 +195,11 @@ function createOutboundNumberSafety({
     cList.push(t);
     contentTimestamps.set(hash, cList);
     refreshState(t);
+  }
+
+  /** @deprecated alias — prefer recordAttempt */
+  function recordSend(args) {
+    return recordAttempt(args);
   }
 
   function pause() {
@@ -224,6 +229,7 @@ function createOutboundNumberSafety({
   return {
     STATES,
     check,
+    recordAttempt,
     recordSend,
     pause,
     resume,

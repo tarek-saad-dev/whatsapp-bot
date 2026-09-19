@@ -88,6 +88,29 @@ describe('atomicWrite last-known-good durability (M2)', () => {
     expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ good: true });
   });
 
+  for (const code of ['EPERM', 'EACCES', 'EEXIST']) {
+    it(`rename ${code} leaves destination untouched (no unlink fallback)`, () => {
+      const filePath = path.join(tmpDir, `state-${code}.json`);
+      writeAtomicFile(filePath, JSON.stringify({ good: true, code }));
+      let unlinkDestCalls = 0;
+      const failing = wrapFs({
+        renameSync() {
+          throw Object.assign(new Error(`rename ${code}`), { code });
+        },
+        unlinkSync(p) {
+          if (path.resolve(p) === path.resolve(filePath)) {
+            unlinkDestCalls += 1;
+          }
+          return fs.unlinkSync(p);
+        },
+      });
+      expect(() => writeAtomicFile(filePath, JSON.stringify({ bad: true }), { fsImpl: failing }))
+        .toThrow(new RegExp(`rename ${code}`));
+      expect(unlinkDestCalls).toBe(0);
+      expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ good: true, code });
+    });
+  }
+
   it('idempotency store reloads last good committed state after failed persist attempt', () => {
     const filePath = path.join(tmpDir, 'outbound-idempotency.json');
     const store = createOutboundIdempotencyStore({ filePath });

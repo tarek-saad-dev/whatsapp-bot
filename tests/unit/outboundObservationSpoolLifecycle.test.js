@@ -79,15 +79,118 @@ describe('outbound observation spool lifecycle (M1)', () => {
     await worker.tick();
     expect(spool.get('X404').status).toBe(STATUS.PENDING);
     expect(spool.get('X404').lastError).toBe('HTTP_404');
+    expect(spool.get('X404').consecutive404).toBe(1);
 
     await worker.tick();
     expect(spool.get('X404').status).toBe(STATUS.PENDING);
+    expect(spool.get('X404').consecutive404).toBe(2);
 
     await worker.tick();
     expect(spool.get('X404').status).toBe(STATUS.FAILED);
+    expect(spool.get('X404').consecutive404).toBe(3);
     expect(spool.getPendingForDelivery()).toHaveLength(0);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     worker.stop();
+  });
+
+  it('500 then two 404s still retry; third consecutive 404 fails', async () => {
+    const spool = makeSpool();
+    seedPending(spool, 'MIX');
+    const statuses = [500, 404, 404, 404];
+    const fetchImpl = vi.fn(async () => ({ status: statuses.shift() }));
+    const worker = createDrvowaOutboundObservationWorker({
+      accountKey: 'wa_a',
+      spool,
+      fetchImpl,
+      runtimeToken: 't',
+      ingestUrl: 'http://127.0.0.1:9/x',
+      enabled: () => true,
+      backoffMs: [0, 0, 0, 0, 0, 0, 0, 0],
+      logger: { info() {}, warn() {} },
+    });
+
+    await worker.tick(); // 500
+    expect(spool.get('MIX').status).toBe(STATUS.PENDING);
+    expect(spool.get('MIX').consecutive404).toBe(0);
+
+    await worker.tick(); // 404 #1
+    expect(spool.get('MIX').status).toBe(STATUS.PENDING);
+    expect(spool.get('MIX').consecutive404).toBe(1);
+
+    await worker.tick(); // 404 #2 — still retry (not 3 consecutive from attempts)
+    expect(spool.get('MIX').status).toBe(STATUS.PENDING);
+    expect(spool.get('MIX').consecutive404).toBe(2);
+    expect(spool.get('MIX').attempts).toBe(3);
+
+    await worker.tick(); // 404 #3 consecutive → FAILED
+    expect(spool.get('MIX').status).toBe(STATUS.FAILED);
+    expect(spool.get('MIX').consecutive404).toBe(3);
+    worker.stop();
+  });
+
+  it('404 then 500 resets consecutive404; not permanent on mixed streak', async () => {
+    const spool = makeSpool();
+    seedPending(spool, 'RST');
+    const statuses = [404, 500, 404];
+    const fetchImpl = vi.fn(async () => ({ status: statuses.shift() }));
+    const worker = createDrvowaOutboundObservationWorker({
+      accountKey: 'wa_a',
+      spool,
+      fetchImpl,
+      runtimeToken: 't',
+      ingestUrl: 'http://127.0.0.1:9/x',
+      enabled: () => true,
+      backoffMs: [0, 0, 0, 0, 0, 0, 0, 0],
+      logger: { info() {}, warn() {} },
+    });
+
+    await worker.tick();
+    expect(spool.get('RST').consecutive404).toBe(1);
+    await worker.tick();
+    expect(spool.get('RST').consecutive404).toBe(0);
+    expect(spool.get('RST').status).toBe(STATUS.PENDING);
+    await worker.tick();
+    expect(spool.get('RST').consecutive404).toBe(1);
+    expect(spool.get('RST').status).toBe(STATUS.PENDING);
+    worker.stop();
+  });
+
+  it('restart after two 404s; third consecutive 404 becomes permanent', async () => {
+    const spoolFile = path.join(tmpDir, 'restart-404.json');
+    const spool1 = createOutboundObservationSpool({ spoolFile });
+    seedPending(spool1, 'R404');
+    const fetchImpl = vi.fn(async () => ({ status: 404 }));
+    const worker1 = createDrvowaOutboundObservationWorker({
+      accountKey: 'wa_a',
+      spool: spool1,
+      fetchImpl,
+      runtimeToken: 't',
+      ingestUrl: 'http://127.0.0.1:9/x',
+      enabled: () => true,
+      backoffMs: [0, 0, 0, 0, 0, 0, 0, 0],
+      logger: { info() {}, warn() {} },
+    });
+    await worker1.tick();
+    await worker1.tick();
+    expect(spool1.get('R404').consecutive404).toBe(2);
+    worker1.stop();
+
+    const spool2 = createOutboundObservationSpool({ spoolFile });
+    expect(spool2.get('R404').consecutive404).toBe(2);
+    const worker2 = createDrvowaOutboundObservationWorker({
+      accountKey: 'wa_a',
+      spool: spool2,
+      fetchImpl,
+      runtimeToken: 't',
+      ingestUrl: 'http://127.0.0.1:9/x',
+      enabled: () => true,
+      backoffMs: [0, 0, 0, 0, 0, 0, 0, 0],
+      logger: { info() {}, warn() {} },
+    });
+    await worker2.tick();
+    expect(spool2.get('R404').status).toBe(STATUS.FAILED);
+    expect(spool2.get('R404').consecutive404).toBe(3);
+    worker2.stop();
   });
 
   it('401 fails permanently on first attempt', async () => {

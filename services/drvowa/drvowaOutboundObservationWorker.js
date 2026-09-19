@@ -19,6 +19,8 @@ function pickBackoff(table, attempts) {
 /**
  * Classify outbound-observation HTTP outcomes.
  * 404 is soft until PERSISTENT_404_THRESHOLD consecutive failures.
+ * @param {number} statusCode
+ * @param {{ consecutive404?: number }} opts - consecutive404 count *before* this response
  */
 function classifyOutboundObservationOutcome(statusCode, { consecutive404 = 0 } = {}) {
   if (statusCode >= 200 && statusCode < 300) return 'delivered';
@@ -29,13 +31,6 @@ function classifyOutboundObservationOutcome(statusCode, { consecutive404 = 0 } =
   if (statusCode === 408 || statusCode === 429 || statusCode >= 500) return 'retry';
   if (statusCode >= 400 && statusCode < 500) return 'permanent';
   return 'retry';
-}
-
-function countConsecutive404(record) {
-  if (!record) return 0;
-  const err = String(record.lastError || '');
-  if (err === 'HTTP_404') return Number(record.attempts || 0);
-  return 0;
 }
 
 /**
@@ -79,13 +74,14 @@ function createDrvowaOutboundObservationWorker({
     (logger.info || console.log).bind(logger)(`[drvowa-outbound] ${event}`, fields);
   }
 
-  function failPermanent(record, error) {
+  function failPermanent(record, error, { consecutive404 } = {}) {
     if (typeof spool.markFailed === 'function') {
-      spool.markFailed(record.providerMessageId, error);
+      spool.markFailed(record.providerMessageId, error, { consecutive404 });
     } else {
       spool.markRetry(record.providerMessageId, {
         nextRetryAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
         error,
+        consecutive404,
       });
     }
     lastErrorCode = error;
@@ -96,16 +92,17 @@ function createDrvowaOutboundObservationWorker({
     });
   }
 
-  function scheduleRetry(record, error) {
+  function scheduleRetry(record, error, { consecutive404 } = {}) {
     const attempts = record.attempts || 0;
     if (attempts + 1 >= maxAttempts) {
-      failPermanent(record, error || 'MAX_ATTEMPTS');
+      failPermanent(record, error || 'MAX_ATTEMPTS', { consecutive404 });
       return;
     }
     const delayMs = pickBackoff(backoffMs, attempts);
     spool.markRetry(record.providerMessageId, {
       nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
       error,
+      consecutive404,
     });
     lastErrorCode = error;
   }
@@ -141,14 +138,17 @@ function createDrvowaOutboundObservationWorker({
         return;
       }
 
-      const consecutive404 = countConsecutive404(record);
-      const outcome = classifyOutboundObservationOutcome(response.status, { consecutive404 });
+      const prev404 = Number(record.consecutive404) || 0;
+      const next404 = response.status === 404 ? prev404 + 1 : 0;
+      const outcome = classifyOutboundObservationOutcome(response.status, {
+        consecutive404: prev404,
+      });
       const error = `HTTP_${response.status}`;
       if (outcome === 'permanent') {
-        failPermanent(record, error);
+        failPermanent(record, error, { consecutive404: next404 });
         return;
       }
-      scheduleRetry(record, error);
+      scheduleRetry(record, error, { consecutive404: next404 });
     } finally {
       if (timerHandle) clearTimeout(timerHandle);
     }
@@ -187,7 +187,8 @@ function createDrvowaOutboundObservationWorker({
           await deliverRecord(record);
         } catch (err) {
           const msg = err && err.message ? err.message : String(err);
-          scheduleRetry(record, msg);
+          // Non-HTTP failures reset consecutive 404 streak.
+          scheduleRetry(record, msg, { consecutive404: 0 });
           lastErrorCode = 'DELIVERY_ERROR';
         }
       }

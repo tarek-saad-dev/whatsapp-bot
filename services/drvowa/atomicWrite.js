@@ -6,7 +6,10 @@ const path = require('path');
 /**
  * Last-known-good atomic JSON/text write:
  * write temp → fsync → close → rename → best-effort dir fsync.
- * Never truncates the destination before a successful replacement.
+ *
+ * Never truncates or unlinks the destination before a successful replacement.
+ * If rename fails (including EEXIST / EPERM / EACCES), clean the temp and throw —
+ * the previous committed destination remains untouched.
  */
 function writeAtomicFile(filePath, contents, {
   encoding = 'utf8',
@@ -27,8 +30,8 @@ function writeAtomicFile(filePath, contents, {
   } catch (err) {
     if (fd != null) {
       try { fsImpl.closeSync(fd); } catch (_) { /* ignore */ }
-      fd = null;
     }
+    fd = null;
     try { fsImpl.unlinkSync(tmp); } catch (_) { /* ignore */ }
     throw err;
   }
@@ -43,22 +46,8 @@ function writeAtomicFile(filePath, contents, {
   try {
     fsImpl.renameSync(tmp, filePath);
   } catch (err) {
-    if (err && (err.code === 'EEXIST' || err.code === 'EPERM' || err.code === 'EACCES')) {
-      try {
-        fsImpl.unlinkSync(filePath);
-      } catch (_) {
-        // ignore — may still allow rename
-      }
-      try {
-        fsImpl.renameSync(tmp, filePath);
-      } catch (err2) {
-        try { fsImpl.unlinkSync(tmp); } catch (_) { /* ignore */ }
-        throw err2;
-      }
-    } else {
-      try { fsImpl.unlinkSync(tmp); } catch (_) { /* ignore */ }
-      throw err;
-    }
+    try { fsImpl.unlinkSync(tmp); } catch (_) { /* ignore */ }
+    throw err;
   }
 
   // Best-effort parent directory fsync (not available on all platforms).

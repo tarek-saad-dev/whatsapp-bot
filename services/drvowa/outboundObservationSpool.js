@@ -24,10 +24,15 @@ function utcNow() {
   return new Date().toISOString();
 }
 
+/**
+ * Only exact known origins are accepted.
+ * Unknown / invalid / missing → UNRESOLVED (never silently HUMAN_MANUAL).
+ */
 function normalizeOrigin(origin) {
   if (origin === ORIGIN.DRVOWA_API) return ORIGIN.DRVOWA_API;
+  if (origin === ORIGIN.HUMAN_MANUAL) return ORIGIN.HUMAN_MANUAL;
   if (origin === ORIGIN.UNRESOLVED) return ORIGIN.UNRESOLVED;
-  return ORIGIN.HUMAN_MANUAL;
+  return ORIGIN.UNRESOLVED;
 }
 
 function statusForOrigin(origin) {
@@ -110,6 +115,11 @@ function createOutboundObservationSpool({
           if (item.origin === ORIGIN.UNRESOLVED && item.status === STATUS.PENDING) {
             item.status = STATUS.UNRESOLVED;
           }
+          if (item.consecutive404 == null || !Number.isFinite(Number(item.consecutive404))) {
+            item.consecutive404 = 0;
+          } else {
+            item.consecutive404 = Math.max(0, Number(item.consecutive404));
+          }
           records.set(item.providerMessageId, item);
         }
       }
@@ -129,6 +139,7 @@ function createOutboundObservationSpool({
       externalContactKey: observation.externalContactKey || null,
       occurredAt: observation.occurredAt || utcNow(),
       attempts: 0,
+      consecutive404: 0,
       nextRetryAt: utcNow(),
       lastError: null,
       capturedAt: utcNow(),
@@ -251,7 +262,7 @@ function createOutboundObservationSpool({
     return record;
   }
 
-  function markRetry(providerMessageId, { nextRetryAt, error } = {}) {
+  function markRetry(providerMessageId, { nextRetryAt, error, consecutive404 } = {}) {
     const record = records.get(providerMessageId);
     if (!record) return null;
     // Never move UNRESOLVED holds into delivery via retry.
@@ -262,11 +273,18 @@ function createOutboundObservationSpool({
     record.lastError = error || null;
     record.nextRetryAt = nextRetryAt || utcNow();
     record.status = STATUS.PENDING;
+    if (typeof consecutive404 === 'number' && Number.isFinite(consecutive404)) {
+      record.consecutive404 = Math.max(0, consecutive404);
+    } else if (error === 'HTTP_404') {
+      record.consecutive404 = (Number(record.consecutive404) || 0) + 1;
+    } else {
+      record.consecutive404 = 0;
+    }
     persist();
     return record;
   }
 
-  function markFailed(providerMessageId, error = null) {
+  function markFailed(providerMessageId, error = null, opts = {}) {
     const record = records.get(String(providerMessageId || ''));
     if (!record) return null;
     if (record.status === STATUS.UNRESOLVED || record.origin === ORIGIN.UNRESOLVED) {
@@ -276,6 +294,11 @@ function createOutboundObservationSpool({
     record.status = STATUS.FAILED;
     record.lastError = error || null;
     record.nextRetryAt = utcNow();
+    if (typeof opts.consecutive404 === 'number' && Number.isFinite(opts.consecutive404)) {
+      record.consecutive404 = Math.max(0, opts.consecutive404);
+    } else if (error === 'HTTP_404') {
+      record.consecutive404 = (Number(record.consecutive404) || 0) + 1;
+    }
     persist();
     return record;
   }
@@ -356,4 +379,5 @@ module.exports = {
   createOutboundObservationSpool,
   STATUS,
   ORIGIN,
+  normalizeOrigin,
 };
