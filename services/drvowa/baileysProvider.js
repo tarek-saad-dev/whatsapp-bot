@@ -26,6 +26,9 @@ const {
 const {
   sendManagedWithIdempotency,
 } = require('./managedOutboundSend');
+const {
+  createOutboundNumberSafety,
+} = require('./outboundNumberSafety');
 
 function createNoopDeliveryWorker() {
   return {
@@ -101,6 +104,9 @@ function createBaileysProvider({
     observationWorker: outboundObservationWorker,
     logger,
   });
+
+  // One safety instance per provider lifecycle — counters survive across sends.
+  const numberSafety = createOutboundNumberSafety({ accountKey });
 
   const deliveryWorker = createDeliveryWorker({
     accountKey,
@@ -228,6 +234,7 @@ function createBaileysProvider({
       // Fail-safe: queue DRVOWA_API observation from the managed send path.
       // Baileys does not reliably echo same-socket sends via messages.upsert/fromMe.
       observeApiOutbound: (payload) => outboundObservedPoster.observe(payload),
+      numberSafety,
       logger,
     });
   }
@@ -269,10 +276,34 @@ function createBaileysProvider({
         deliveryEnabled: Boolean(outboundObs.deliveryEnabled),
         pending: outboundObs.pending ?? 0,
         unresolved: outboundObs.unresolved ?? 0,
+        failed: outboundObs.failed ?? 0,
         delivered: outboundObs.delivered ?? 0,
+        oldestUnresolvedCapturedAt: outboundObs.oldestUnresolvedCapturedAt || null,
+        unresolvedSaturated: Boolean(outboundObs.unresolvedSaturated),
         fetchAttempts: outboundObs.fetchAttempts ?? 0,
         lastErrorCode: outboundObs.lastErrorCode || null,
       },
+      idempotency: (() => {
+        const s = typeof idempotencyStore.getStats === 'function'
+          ? idempotencyStore.getStats()
+          : { total: idempotencyStore.size(), sending: 0, sent: 0, saturated: false };
+        return {
+          total: s.total ?? 0,
+          sending: s.sending ?? 0,
+          sent: s.sent ?? 0,
+          saturated: Boolean(s.saturated),
+        };
+      })(),
+      numberSafety: (() => {
+        const s = numberSafety.getStatus();
+        return {
+          state: s.state,
+          cooldownUntil: s.cooldownUntil,
+          minuteCount: s.minuteCount,
+          hourCount: s.hourCount,
+          dayCount: s.dayCount,
+        };
+      })(),
     };
   }
 

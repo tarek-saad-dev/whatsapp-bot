@@ -109,6 +109,7 @@ async function sendManagedWithIdempotency({
   store,
   sendFn,
   observeApiOutbound = null,
+  numberSafety = null,
   logger = console,
 }) {
   const keyCheck = validateIdempotencyKey(rawKey);
@@ -175,6 +176,29 @@ async function sendManagedWithIdempotency({
         idempotencyKey,
         error: 'Outbound send result is unknown; will not auto-resend',
         httpStatus: 409,
+      };
+    }
+  }
+
+  // NEW sends only — after SENT duplicate / SENDING unknown short-circuits above.
+  if (numberSafety && typeof numberSafety.check === 'function') {
+    const admission = numberSafety.check({ phone, message });
+    if (!admission.allowed) {
+      logOutbound(logger, 'number_safety_rejected', {
+        accountKey,
+        idempotencyKey,
+        reason: admission.reason || 'blocked',
+        state: admission.state || null,
+      });
+      return {
+        success: false,
+        status: 'failed',
+        code: 'OUTBOUND_NUMBER_SAFETY',
+        error: 'Outbound send blocked by number safety policy',
+        idempotencyKey,
+        sendAttempted: false,
+        outcomeUnknown: false,
+        httpStatus: 429,
       };
     }
   }
@@ -297,6 +321,9 @@ async function sendManagedWithIdempotency({
   }
 
   store.markSent({ idempotencyKey, providerMessageId: messageId });
+  if (numberSafety && typeof numberSafety.recordSend === 'function') {
+    numberSafety.recordSend({ phone, message });
+  }
   logOutbound(logger, 'sent', {
     accountKey,
     idempotencyKey,
