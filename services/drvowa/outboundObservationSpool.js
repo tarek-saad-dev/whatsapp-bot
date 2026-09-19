@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { writeAtomicFile } = require('./atomicWrite');
 
 const STATUS = Object.freeze({
   PENDING: 'pending_delivery',
@@ -65,14 +66,12 @@ function createOutboundObservationSpool({
 
   function persist() {
     ensureDir();
-    const tmp = `${spoolFile}.tmp`;
     const payload = {
       version: 1,
       updatedAt: utcNow(),
       records: Array.from(records.values()),
     };
-    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
-    fs.renameSync(tmp, spoolFile);
+    writeAtomicFile(spoolFile, `${JSON.stringify(payload, null, 2)}\n`);
   }
 
   function cleanupDelivered() {

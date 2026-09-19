@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { writeAtomicFile } = require('./atomicWrite');
 
 const STATES = Object.freeze({
   SENDING: 'SENDING',
@@ -59,14 +60,12 @@ function createOutboundIdempotencyStore({
 
   function persist() {
     ensureDir();
-    const tmp = `${filePath}.tmp`;
     const payload = {
       version: 1,
       updatedAt: utcNow(),
       entries: Array.from(byKey.values()),
     };
-    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
-    fs.renameSync(tmp, filePath);
+    writeAtomicFile(filePath, `${JSON.stringify(payload, null, 2)}\n`);
   }
 
   function rebuildProviderIndex() {
