@@ -214,7 +214,7 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
     expect(sendFn).not.toHaveBeenCalled();
   });
 
-  it('2A.1-10. same-phone text mismatch is UNRESOLVED (not HUMAN_MANUAL)', async () => {
+  it('2A.1-10. same-phone different non-null text is HUMAN_MANUAL (plain-text mismatch)', async () => {
     const { hashPayload, STATES } = require('../../services/drvowa/outboundIdempotencyStore');
     const idem = createOutboundIdempotencyStore({
       filePath: path.join(tmpDir, 'outbound-idempotency.json'),
@@ -239,9 +239,8 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
       text: 'totally different human text',
       occurredAt: new Date().toISOString(),
     });
-    expect(result.origin).toBe('UNRESOLVED');
-    expect(spool.getStats().unresolved).toBe(1);
-    expect(spool.getPendingForDelivery()).toHaveLength(0);
+    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(spool.getPendingForDelivery()).toHaveLength(1);
     expect(idem.get('key-other').state).toBe(STATES.SENDING);
     expect(idem.isApiOrigin('HUMAN-OTHER')).toBe(false);
   });

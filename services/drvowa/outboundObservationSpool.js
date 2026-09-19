@@ -192,6 +192,29 @@ function createOutboundObservationSpool({
       };
     }
 
+    // Promote held UNRESOLVED → decisive HUMAN when observer now has no API ambiguity.
+    if (
+      proposed === ORIGIN.HUMAN_MANUAL
+      && (existing.origin === ORIGIN.UNRESOLVED || existing.status === STATUS.UNRESOLVED)
+    ) {
+      existing.origin = ORIGIN.HUMAN_MANUAL;
+      existing.status = STATUS.PENDING;
+      existing.nextRetryAt = utcNow();
+      existing.lastError = null;
+      if (observation.phone && !existing.phone) existing.phone = observation.phone;
+      if (observation.externalContactKey && !existing.externalContactKey) {
+        existing.externalContactKey = observation.externalContactKey;
+      }
+      if (observation.occurredAt) existing.occurredAt = observation.occurredAt;
+      persist();
+      return {
+        record: existing,
+        duplicate: true,
+        promoted: true,
+        conflict: false,
+      };
+    }
+
     // Already decisive HUMAN — do not silently flip.
     if (existing.origin === ORIGIN.HUMAN_MANUAL) {
       return {
@@ -202,7 +225,7 @@ function createOutboundObservationSpool({
       };
     }
 
-    // Existing UNRESOLVED + non-API proposal: keep held.
+    // Existing UNRESOLVED + still-ambiguous proposal: keep held.
     return {
       record: existing,
       duplicate: true,
@@ -255,6 +278,7 @@ function createOutboundObservationSpool({
     let unresolved = 0;
     let delivered = 0;
     let failed = 0;
+    let oldestUnresolvedCapturedAt = null;
     for (const record of records.values()) {
       if (record.status === STATUS.DELIVERED) delivered += 1;
       else if (record.status === STATUS.FAILED) failed += 1;
@@ -263,9 +287,25 @@ function createOutboundObservationSpool({
         || record.origin === ORIGIN.UNRESOLVED
       ) {
         unresolved += 1;
+        const capturedAt = record.capturedAt || null;
+        if (
+          capturedAt
+          && (!oldestUnresolvedCapturedAt
+            || Date.parse(capturedAt) < Date.parse(oldestUnresolvedCapturedAt))
+        ) {
+          oldestUnresolvedCapturedAt = capturedAt;
+        }
       } else pending += 1;
     }
-    return { pending, unresolved, delivered, failed, total: records.size };
+    return {
+      pending,
+      unresolved,
+      delivered,
+      failed,
+      total: records.size,
+      // Accumulation signal only — no silent deletion of UNRESOLVED in this phase.
+      oldestUnresolvedCapturedAt,
+    };
   }
 
   function get(providerMessageId) {

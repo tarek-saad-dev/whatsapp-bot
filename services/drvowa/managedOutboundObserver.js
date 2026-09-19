@@ -70,9 +70,12 @@ function createManagedOutboundObserver({
       if (recon.reason === 'ambiguous_match') {
         return { origin: 'UNRESOLVED', reason: 'ambiguous_match', matchCount: recon.matchCount };
       }
-      // Exact hash no_match but unresolved SENDING for this phone → ambiguous.
+      // Managed plain-text sends use sock.sendMessage({ text }) and extractText()
+      // reads conversation / extendedTextMessage.text — a different non-null text
+      // cannot match that SENDING payloadHash, so treat as decisive HUMAN_MANUAL.
+      // Null/insufficient text remains UNRESOLVED (media / incomplete echo).
       if (hasPhoneSending) {
-        return { origin: 'UNRESOLVED', reason: 'sending_phone_text_mismatch' };
+        return { origin: 'HUMAN_MANUAL', reason: 'sending_phone_text_mismatch' };
       }
       return { origin: 'HUMAN_MANUAL', reason: 'no_api_possibility' };
     }

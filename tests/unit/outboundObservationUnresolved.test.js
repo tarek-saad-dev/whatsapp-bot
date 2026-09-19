@@ -131,7 +131,7 @@ describe('outbound observation UNRESOLVED classification', () => {
     observationWorker.stop();
   });
 
-  it('D. same phone / text mismatch → UNRESOLVED not HUMAN_MANUAL', async () => {
+  it('D. same phone / text mismatch → HUMAN_MANUAL (plain-text evidence)', async () => {
     const { idem, spool, observer } = harness();
     idem.reserveSending({
       idempotencyKey: 'k',
@@ -144,9 +144,9 @@ describe('outbound observation UNRESOLVED classification', () => {
       text: 'other text',
       occurredAt: new Date().toISOString(),
     });
-    expect(result.origin).toBe('UNRESOLVED');
-    expect(result.origin).not.toBe('HUMAN_MANUAL');
-    expect(spool.getStats().unresolved).toBe(1);
+    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(spool.getStats().pending).toBe(1);
+    expect(spool.getPendingForDelivery()[0].origin).toBe('HUMAN_MANUAL');
   });
 
   it('E. same phone / null text → UNRESOLVED', async () => {
@@ -438,5 +438,169 @@ describe('outbound observation worker/stats/managed send (L/M/N)', () => {
     expect(spool.getStats().total).toBe(1);
     expect(spool.getPendingForDelivery()[0].origin).toBe('DRVOWA_API');
     expect(spool.getPendingForDelivery()[0].providerMessageId).toBe('SEND-N1');
+  });
+});
+
+describe('UNRESOLVED lifecycle promotions', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drvowa-obs-life-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('B/C/D/E/I. UNRESOLVED → HUMAN_MANUAL after ambiguity cleared; one POST', async () => {
+    const idem = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger: { info() {}, warn() {} },
+    });
+
+    // Ambiguous API SENDING for phone A (null-text human cannot resolve)
+    idem.reserveSending({
+      idempotencyKey: 'api-stuck',
+      phone: '201555111111',
+      payloadHash: hashPayload({ phone: '201555111111', message: 'api pending' }),
+    });
+
+    const first = await observer.observe({
+      providerMessageId: 'HUMAN-H',
+      phone: '201555111111',
+      text: null,
+      occurredAt: new Date().toISOString(),
+    });
+    expect(first.origin).toBe('UNRESOLVED');
+    expect(spool.getStats().unresolved).toBe(1);
+    expect(spool.get('HUMAN-H').providerMessageId).toBe('HUMAN-H');
+
+    // Ambiguity cleared (SENDING resolved/cleared — not pruned silently as SENDING forever case,
+    // but operator/reconcile path cleared the reservation)
+    idem.clearSending('api-stuck');
+    expect(idem.hasSendingForPhone('201555111111')).toBe(false);
+
+    const second = await observer.observe({
+      providerMessageId: 'HUMAN-H',
+      phone: '201555111111',
+      text: null,
+      occurredAt: new Date().toISOString(),
+    });
+    expect(second.origin).toBe('HUMAN_MANUAL');
+    expect(second.promoted).toBe(true);
+    expect(spool.getStats().total).toBe(1);
+    expect(spool.getStats().unresolved).toBe(0);
+    expect(spool.getStats().pending).toBe(1);
+    expect(spool.get('HUMAN-H').origin).toBe('HUMAN_MANUAL');
+
+    const fetchImpl = vi.fn(async () => ({ status: 200 }));
+    const worker = createDrvowaOutboundObservationWorker({
+      accountKey: 'wa_a',
+      spool,
+      fetchImpl,
+      runtimeToken: 't',
+      ingestUrl: 'http://127.0.0.1:9/x',
+      enabled: () => true,
+      logger: { info() {}, warn() {} },
+    });
+    worker.start();
+    await worker.tick();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).origin).toBe('HUMAN_MANUAL');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).providerMessageId).toBe('HUMAN-H');
+
+    // Duplicate observe must not POST again
+    await observer.observe({
+      providerMessageId: 'HUMAN-H',
+      phone: '201555111111',
+      text: null,
+      occurredAt: new Date().toISOString(),
+    });
+    await worker.tick();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(spool.getStats().total).toBe(1);
+    worker.stop();
+  });
+
+  it('G. HUMAN_MANUAL cannot silently flip to API', async () => {
+    const idem = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger: { info() {}, warn() {} },
+    });
+
+    await observer.observe({
+      providerMessageId: 'H-KEEP',
+      phone: '201555111111',
+      text: 'manual',
+      occurredAt: new Date().toISOString(),
+    });
+    expect(spool.get('H-KEEP').origin).toBe('HUMAN_MANUAL');
+
+    idem.reserveSending({ idempotencyKey: 'k', phone: '201555111111', payloadHash: 'h' });
+    idem.markSent({ idempotencyKey: 'k', providerMessageId: 'H-KEEP' });
+
+    const again = await observer.observe({
+      providerMessageId: 'H-KEEP',
+      phone: '201555111111',
+      text: 'manual',
+      occurredAt: new Date().toISOString(),
+    });
+    expect(again.origin).toBe('HUMAN_MANUAL');
+    expect(spool.get('H-KEEP').origin).toBe('HUMAN_MANUAL');
+  });
+
+  it('H. still-ambiguous observation remains UNRESOLVED', async () => {
+    const idem = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger: { info() {}, warn() {} },
+    });
+    const phone = '201555111111';
+    const text = 'same';
+    const payloadHash = hashPayload({ phone, message: text });
+    idem.reserveSending({ idempotencyKey: 'a', phone, payloadHash });
+    idem.reserveSending({ idempotencyKey: 'b', phone, payloadHash });
+
+    const first = await observer.observe({
+      providerMessageId: 'STILL-AMB',
+      phone,
+      text,
+      occurredAt: new Date().toISOString(),
+    });
+    expect(first.origin).toBe('UNRESOLVED');
+
+    const second = await observer.observe({
+      providerMessageId: 'STILL-AMB',
+      phone,
+      text,
+      occurredAt: new Date().toISOString(),
+    });
+    expect(second.origin).toBe('UNRESOLVED');
+    expect(second.promoted).toBe(false);
+    expect(spool.getStats().unresolved).toBe(1);
+    expect(spool.getStats().oldestUnresolvedCapturedAt).toBeTruthy();
   });
 });
