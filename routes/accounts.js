@@ -110,8 +110,12 @@ router.post('/:accountKey/send', async (req, res) => {
   if (!accountKey) return;
   try {
     const result = await getWhatsAppAccountManager().send(accountKey, req.body || {});
-    const httpStatus = result && result.success ? 200 : 409;
-    return res.status(httpStatus).json(result);
+    const httpStatus = result && result.httpStatus
+      ? result.httpStatus
+      : (result && result.success ? 200 : 409);
+    const body = { ...result };
+    delete body.httpStatus;
+    return res.status(httpStatus).json(body);
   } catch (err) {
     const statusCode = err.status || 500;
     return res.status(statusCode).json({

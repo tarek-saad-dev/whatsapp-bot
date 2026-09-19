@@ -55,4 +55,14 @@ module.exports = {
   recoverManagedAccounts,
   createDrvowaInboundDeliveryWorker: require('./drvowaInboundDeliveryWorker')
     .createDrvowaInboundDeliveryWorker,
+  createOutboundIdempotencyStore: require('./outboundIdempotencyStore')
+    .createOutboundIdempotencyStore,
+  createOutboundObservationSpool: require('./outboundObservationSpool')
+    .createOutboundObservationSpool,
+  createManagedOutboundObserver: require('./managedOutboundObserver')
+    .createManagedOutboundObserver,
+  createDrvowaOutboundObservationWorker: require('./drvowaOutboundObservationWorker')
+    .createDrvowaOutboundObservationWorker,
+  sendManagedWithIdempotency: require('./managedOutboundSend')
+    .sendManagedWithIdempotency,
 };

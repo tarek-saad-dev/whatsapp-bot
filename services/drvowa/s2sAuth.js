@@ -60,6 +60,16 @@ function getDrvowaInboundUrl() {
   return `${getDrvowaSaasBaseUrl()}/api/runtime/whatsapp/inbound`;
 }
 
+function getDrvowaOutboundObservedUrl() {
+  return `${getDrvowaSaasBaseUrl()}/api/runtime/whatsapp/outbound-observed`;
+}
+
+/** Part 2A: outbound observation delivery is OFF until SaaS Part 2B exists. */
+function isOutboundObservationDeliveryEnabled() {
+  return String(process.env.DRVOWA_OUTBOUND_OBSERVATION_ENABLED || 'false')
+    .toLowerCase() === 'true';
+}
+
 module.exports = {
   isMultiAccountEnabled,
   getRuntimeToken,
@@ -68,4 +78,6 @@ module.exports = {
   getSendQueueMax,
   getDrvowaSaasBaseUrl,
   getDrvowaInboundUrl,
+  getDrvowaOutboundObservedUrl,
+  isOutboundObservationDeliveryEnabled,
 };

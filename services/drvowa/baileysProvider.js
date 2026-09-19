@@ -11,6 +11,21 @@ const { CONNECTION_STATES } = require('./connectionStates');
 const {
   createDrvowaInboundDeliveryWorker,
 } = require('./drvowaInboundDeliveryWorker');
+const {
+  createOutboundIdempotencyStore,
+} = require('./outboundIdempotencyStore');
+const {
+  createOutboundObservationSpool,
+} = require('./outboundObservationSpool');
+const {
+  createManagedOutboundObserver,
+} = require('./managedOutboundObserver');
+const {
+  createDrvowaOutboundObservationWorker,
+} = require('./drvowaOutboundObservationWorker');
+const {
+  sendManagedWithIdempotency,
+} = require('./managedOutboundSend');
 
 function createNoopDeliveryWorker() {
   return {
@@ -45,6 +60,8 @@ function createBaileysProvider({
   const authDir = path.join(authBaseDir, accountKey);
   const lidMapFile = path.join(authDir, 'lid-phone-map.json');
   const spoolFile = path.join(authDir, 'inbox-spool.json');
+  const idempotencyFile = path.join(authDir, 'outbound-idempotency.json');
+  const outboundObsSpoolFile = path.join(authDir, 'outbound-observation-spool.json');
   fs.mkdirSync(authDir, { recursive: true });
 
   // Hard invariant: managed auth must never resolve to legacy singleton auth.
@@ -62,6 +79,29 @@ function createBaileysProvider({
     spoolFile,
   });
 
+  const idempotencyStore = createOutboundIdempotencyStore({
+    filePath: idempotencyFile,
+  });
+
+  const outboundObservationSpool = createOutboundObservationSpool({
+    spoolFile: outboundObsSpoolFile,
+  });
+
+  const outboundObservationWorker = createDrvowaOutboundObservationWorker({
+    accountKey,
+    spool: outboundObservationSpool,
+    logger,
+    fetchImpl,
+  });
+
+  const outboundObservedPoster = createManagedOutboundObserver({
+    accountKey,
+    idempotencyStore,
+    observationSpool: outboundObservationSpool,
+    observationWorker: outboundObservationWorker,
+    logger,
+  });
+
   const deliveryWorker = createDeliveryWorker({
     accountKey,
     spool,
@@ -74,11 +114,7 @@ function createBaileysProvider({
     lidMapFile,
     spool,
     deliveryWorker,
-    outboundObservedPoster: {
-      async observe() {
-        return { skipped: true };
-      },
-    },
+    outboundObservedPoster,
     logger,
     printQrToTerminal,
     onLoggedOut: () => {
@@ -101,7 +137,6 @@ function createBaileysProvider({
         content: event.content,
       });
 
-      // Durable payload for restart-safe delivery (spool already captured).
       if (event.providerMessageId && typeof spool.attachDrvowaPayload === 'function') {
         spool.attachDrvowaPayload(event.providerMessageId, dto);
       }
@@ -145,6 +180,7 @@ function createBaileysProvider({
     try {
       explicitState = CONNECTION_STATES.CONNECTING;
       await transport.start();
+      outboundObservationWorker.start();
       explicitState = deriveState();
       return getStatus();
     } catch (err) {
@@ -156,12 +192,13 @@ function createBaileysProvider({
 
   async function stop() {
     explicitState = CONNECTION_STATES.STOPPING;
+    outboundObservationWorker.stop();
     await transport.stop();
     explicitState = CONNECTION_STATES.STOPPED;
     return getStatus();
   }
 
-  async function send(phone, message) {
+  async function send(phone, message, { idempotencyKey } = {}) {
     const state = deriveState();
     if (state === CONNECTION_STATES.LOGGED_OUT) {
       return {
@@ -169,6 +206,7 @@ function createBaileysProvider({
         status: 'failed',
         error: 'Account is logged out',
         code: 'LOGGED_OUT',
+        idempotencyKey: idempotencyKey || undefined,
       };
     }
     if (state !== CONNECTION_STATES.READY) {
@@ -177,15 +215,25 @@ function createBaileysProvider({
         status: 'failed',
         error: `Account is not READY (state=${state})`,
         code: 'NOT_READY',
+        idempotencyKey: idempotencyKey || undefined,
       };
     }
-    return transport.send(phone, message);
+    return sendManagedWithIdempotency({
+      accountKey,
+      phone,
+      message,
+      idempotencyKey,
+      store: idempotencyStore,
+      sendFn: (p, m) => transport.send(p, m),
+      logger,
+    });
   }
 
   function getStatus() {
     const transportStatus = transport.getStatus();
     const state = deriveState();
     const delivery = deliveryWorker.getStatus();
+    const outboundObs = outboundObservationWorker.getStatus();
     return {
       accountKey,
       provider: 'baileys',
@@ -213,6 +261,14 @@ function createBaileysProvider({
         lastDeliveryAt: delivery.lastDeliveryAt || null,
         lastErrorCode: delivery.lastErrorCode || null,
       },
+      outboundObservation: {
+        running: Boolean(outboundObs.running),
+        deliveryEnabled: Boolean(outboundObs.deliveryEnabled),
+        pending: outboundObs.pending ?? 0,
+        delivered: outboundObs.delivered ?? 0,
+        fetchAttempts: outboundObs.fetchAttempts ?? 0,
+        lastErrorCode: outboundObs.lastErrorCode || null,
+      },
     };
   }
 
@@ -237,6 +293,9 @@ function createBaileysProvider({
     _transport: transport,
     _spool: spool,
     _deliveryWorker: deliveryWorker,
+    _idempotencyStore: idempotencyStore,
+    _outboundObservationSpool: outboundObservationSpool,
+    _outboundObservationWorker: outboundObservationWorker,
   };
 }
 

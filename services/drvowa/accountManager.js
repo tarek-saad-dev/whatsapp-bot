@@ -192,6 +192,7 @@ function createWhatsAppAccountManager({
         status: 'failed',
         error: 'Account runtime is not started',
         code: 'NOT_STARTED',
+        httpStatus: 409,
       };
     }
 
@@ -203,6 +204,7 @@ function createWhatsAppAccountManager({
         status: 'failed',
         error: 'Account is logged out',
         code: 'LOGGED_OUT',
+        httpStatus: 409,
       };
     }
     if (current.state !== CONNECTION_STATES.READY) {
@@ -211,22 +213,27 @@ function createWhatsAppAccountManager({
         status: 'failed',
         error: `Account is not READY (state=${current.state})`,
         code: 'NOT_READY',
+        httpStatus: 409,
       };
     }
 
     const phone = payload && payload.phone;
     const message = payload && payload.message;
+    const idempotencyKey = payload && payload.idempotencyKey;
     if (!phone || !message) {
       return {
         success: false,
         status: 'failed',
         error: 'phone and message are required',
         code: 'INVALID_PAYLOAD',
+        httpStatus: 400,
       };
     }
 
     try {
-      return await entry.queue.enqueue(() => entry.provider.send(phone, message));
+      return await entry.queue.enqueue(() => entry.provider.send(phone, message, {
+        idempotencyKey,
+      }));
     } catch (err) {
       if (err && err.code === 'QUEUE_FULL') {
         return {
@@ -234,6 +241,7 @@ function createWhatsAppAccountManager({
           status: 'failed',
           error: 'Send queue is full',
           code: 'QUEUE_FULL',
+          httpStatus: 429,
         };
       }
       throw err;
