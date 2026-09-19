@@ -3,6 +3,7 @@
 /**
  * Managed fromMe observation → classify API vs human → durable spool.
  * Replaces the noop outboundObservedPoster for managed accounts only.
+ * Reconciles matching SENDING reservations before classification.
  */
 function createManagedOutboundObserver({
   accountKey,
@@ -22,11 +23,46 @@ function createManagedOutboundObserver({
         return { skipped: true, reason: 'missing_provider_message_id' };
       }
 
-      const origin = idempotencyStore && idempotencyStore.isApiOrigin(providerMessageId)
+      let origin = idempotencyStore && idempotencyStore.isApiOrigin(providerMessageId)
         ? 'DRVOWA_API'
         : 'HUMAN_MANUAL';
 
       const phone = payload.phone || null;
+      const text = payload.text != null ? String(payload.text) : null;
+
+      if (
+        origin !== 'DRVOWA_API'
+        && idempotencyStore
+        && typeof idempotencyStore.reconcileSendingFromObservation === 'function'
+        && phone
+        && text != null
+      ) {
+        const recon = idempotencyStore.reconcileSendingFromObservation({
+          phone,
+          text,
+          providerMessageId,
+        });
+        if (recon.reconciled) {
+          origin = 'DRVOWA_API';
+          (logger.info || console.log).bind(logger)(
+            '[drvowa-outbound] reconciled_from_observation',
+            {
+              accountKey,
+              idempotencyKey: recon.idempotencyKey || null,
+              providerMessageId,
+            },
+          );
+        }
+      } else if (
+        origin !== 'DRVOWA_API'
+        && idempotencyStore
+        && typeof idempotencyStore.reconcileSendingFromObservation === 'function'
+        && phone
+        && text == null
+      ) {
+        // Without text we cannot safely hash-match; leave HUMAN_MANUAL.
+      }
+
       const externalContactKey = phone
         ? `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`
         : (payload?.rawPayload?.resolvedCustomerJid || null);

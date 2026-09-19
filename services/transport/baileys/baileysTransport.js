@@ -628,6 +628,8 @@ function createBaileysTransport({
                 status: 'failed',
                 error: 'WhatsApp session is logged out. Re-pair required.',
                 code: 'LOGGED_OUT',
+                sendAttempted: false,
+                outcomeUnknown: false,
             };
         }
         if (!sock || !ready) {
@@ -635,6 +637,8 @@ function createBaileysTransport({
                 success: false,
                 status: 'failed',
                 error: 'WhatsApp transport is not ready. Please scan the QR code and try again.',
+                sendAttempted: false,
+                outcomeUnknown: false,
             };
         }
 
@@ -644,6 +648,8 @@ function createBaileysTransport({
                 success: false,
                 status: 'failed',
                 error: destination.error || 'invalid_phone',
+                sendAttempted: false,
+                outcomeUnknown: false,
             };
         }
 
@@ -681,6 +687,20 @@ function createBaileysTransport({
                 sendLatencyMs: sendCompletedAt - sendStartedAt,
                 storedForRetry: Boolean(messageId),
             });
+            if (!messageId) {
+                return {
+                    success: false,
+                    status: 'unknown',
+                    code: 'OUTBOUND_RESULT_UNKNOWN',
+                    error: 'Baileys send returned without providerMessageId',
+                    phone: destination.phone,
+                    chatId: jid,
+                    route: destination.route,
+                    sendAttempted: true,
+                    outcomeUnknown: true,
+                    sendLatencyMs: sendCompletedAt - sendStartedAt,
+                };
+            }
             return {
                 success: true,
                 status: 'sent',
@@ -689,6 +709,8 @@ function createBaileysTransport({
                 chatId: jid,
                 route: destination.route,
                 sendLatencyMs: sendCompletedAt - sendStartedAt,
+                sendAttempted: true,
+                outcomeUnknown: false,
             };
         } catch (error) {
             lastError = error.message || String(error);
@@ -700,11 +722,14 @@ function createBaileysTransport({
             });
             return {
                 success: false,
-                status: 'failed',
+                status: 'unknown',
+                code: 'OUTBOUND_RESULT_UNKNOWN',
                 error: lastError,
                 phone: destination.phone,
                 chatId: jid,
                 route: destination.route,
+                sendAttempted: true,
+                outcomeUnknown: true,
             };
         }
     }

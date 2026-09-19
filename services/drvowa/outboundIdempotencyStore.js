@@ -16,10 +16,14 @@ function utcNow() {
   return new Date().toISOString();
 }
 
+function normalizePhoneForHash(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
 function hashPayload({ phone, message }) {
   return crypto
     .createHash('sha256')
-    .update(`${String(phone || '')}\0${String(message || '')}`, 'utf8')
+    .update(`${normalizePhoneForHash(phone)}\0${String(message || '')}`, 'utf8')
     .digest('hex');
 }
 
@@ -123,7 +127,7 @@ function createOutboundIdempotencyStore({
       idempotencyKey: String(idempotencyKey),
       state: STATES.SENDING,
       providerMessageId: null,
-      phone: String(phone || ''),
+      phone: normalizePhoneForHash(phone),
       payloadHash: String(payloadHash || ''),
       origin: 'DRVOWA_API',
       createdAt: now,
@@ -149,8 +153,8 @@ function createOutboundIdempotencyStore({
   }
 
   /**
-   * Clear a failed first-attempt reservation so a later distinct retry can proceed.
-   * Never clears SENT.
+   * Clear a definitive pre-send failure reservation.
+   * Never clears SENT. Never use for ambiguous post-attempt failures.
    */
   function clearSending(idempotencyKey) {
     const entry = byKey.get(String(idempotencyKey));
@@ -171,8 +175,65 @@ function createOutboundIdempotencyStore({
     return byKey.get(key) || null;
   }
 
+  function findSendingByPhoneAndHash({ phone, payloadHash }) {
+    const normalized = normalizePhoneForHash(phone);
+    const hash = String(payloadHash || '');
+    const matches = [];
+    for (const entry of byKey.values()) {
+      if (entry.state !== STATES.SENDING) continue;
+      if (normalizePhoneForHash(entry.phone) !== normalized) continue;
+      if (String(entry.payloadHash || '') !== hash) continue;
+      matches.push(entry);
+    }
+    return matches;
+  }
+
+  /**
+   * Reconcile a SENDING reservation from a matching fromMe observation.
+   * Binds only when exactly one candidate matches phone + payloadHash.
+   */
+  function reconcileSendingFromObservation({ phone, text, providerMessageId }) {
+    const pid = providerMessageId ? String(providerMessageId) : '';
+    if (!pid) {
+      return { reconciled: false, reason: 'missing_provider_message_id', matchCount: 0 };
+    }
+    if (byProviderMessageId.has(pid)) {
+      return {
+        reconciled: false,
+        reason: 'already_correlated',
+        matchCount: 0,
+        idempotencyKey: byProviderMessageId.get(pid),
+      };
+    }
+    const payloadHash = hashPayload({ phone, message: text || '' });
+    const matches = findSendingByPhoneAndHash({ phone, payloadHash });
+    if (matches.length === 0) {
+      return { reconciled: false, reason: 'no_match', matchCount: 0 };
+    }
+    if (matches.length > 1) {
+      return { reconciled: false, reason: 'ambiguous_match', matchCount: matches.length };
+    }
+    const entry = matches[0];
+    markSent({
+      idempotencyKey: entry.idempotencyKey,
+      providerMessageId: pid,
+    });
+    return {
+      reconciled: true,
+      reason: 'matched',
+      matchCount: 1,
+      idempotencyKey: entry.idempotencyKey,
+      entry: byKey.get(entry.idempotencyKey),
+    };
+  }
+
   function size() {
     return byKey.size;
+  }
+
+  /** Test/audit helper — must never include plaintext message bodies. */
+  function dumpEntries() {
+    return Array.from(byKey.values()).map((e) => ({ ...e }));
   }
 
   load();
@@ -181,21 +242,26 @@ function createOutboundIdempotencyStore({
     STATES,
     filePath,
     hashPayload,
+    normalizePhoneForHash,
     get,
     reserveSending,
     markSent,
     clearSending,
     isApiOrigin,
     getByProviderMessageId,
+    findSendingByPhoneAndHash,
+    reconcileSendingFromObservation,
     size,
     prune,
     load,
     persist,
+    dumpEntries,
   };
 }
 
 module.exports = {
   createOutboundIdempotencyStore,
   hashPayload,
+  normalizePhoneForHash,
   STATES,
 };

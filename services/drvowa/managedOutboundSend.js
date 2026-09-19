@@ -21,6 +21,38 @@ function logOutbound(logger, event, fields = {}) {
   fn(`[drvowa-outbound] ${event}`, fields);
 }
 
+function isAmbiguousSendResult(result) {
+  if (!result || typeof result !== 'object') return false;
+  if (result.outcomeUnknown === true) return true;
+  if (result.sendAttempted === true) return true;
+  if (result.code === 'OUTBOUND_RESULT_UNKNOWN') return true;
+  return false;
+}
+
+function isDefinitivePreSendFailure(result) {
+  if (!result || typeof result !== 'object') return false;
+  if (result.sendAttempted === true || result.outcomeUnknown === true) return false;
+  if (result.sendAttempted === false) return true;
+  // Legacy/transport results without flags that failed before attempt.
+  const definitiveCodes = new Set([
+    'NOT_READY',
+    'LOGGED_OUT',
+    'NOT_STARTED',
+    'INVALID_PAYLOAD',
+    'IDEMPOTENCY_KEY_REQUIRED',
+  ]);
+  if (result.code && definitiveCodes.has(result.code)) return true;
+  if (result.success === false && result.sendAttempted == null) {
+    // Conservative: without sendAttempted metadata, treat as definitive only when
+    // error clearly indicates pre-send validation (invalid phone etc).
+    const err = String(result.error || '').toLowerCase();
+    if (err.includes('invalid') || err.includes('not ready') || err.includes('logged out')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Idempotent managed outbound send (must run inside per-account send queue).
  */
@@ -48,17 +80,18 @@ async function sendManagedWithIdempotency({
   const existing = store.get(idempotencyKey);
 
   if (existing) {
+    if (existing.payloadHash && existing.payloadHash !== payloadHash) {
+      return {
+        success: false,
+        status: 'failed',
+        error: 'Idempotency key was already used with a different destination or payload',
+        code: 'IDEMPOTENCY_CONFLICT',
+        idempotencyKey,
+        httpStatus: 409,
+      };
+    }
+
     if (existing.state === STATES.SENT) {
-      if (existing.payloadHash && existing.payloadHash !== payloadHash) {
-        return {
-          success: false,
-          status: 'failed',
-          error: 'Idempotency key was already used with a different destination or payload',
-          code: 'IDEMPOTENCY_CONFLICT',
-          idempotencyKey,
-          httpStatus: 409,
-        };
-      }
       logOutbound(logger, 'duplicate', {
         accountKey,
         idempotencyKey,
@@ -104,31 +137,75 @@ async function sendManagedWithIdempotency({
   try {
     result = await sendFn(phone, message);
   } catch (err) {
-    // Definitive failure before WhatsApp accept — clear reservation so a new key
-    // or later explicit operator action can proceed. Ambiguous network after
-    // accept is rare here; Baileys typically throws before returning an id.
-    store.clearSending(idempotencyKey);
-    throw err;
+    // Unexpected throw: preserve SENDING unless caller marked definitive pre-send.
+    if (err && err.sendAttempted === false) {
+      store.clearSending(idempotencyKey);
+      throw err;
+    }
+    logOutbound(logger, 'ambiguous_preserved', {
+      accountKey,
+      idempotencyKey,
+    });
+    return {
+      success: false,
+      status: 'unknown',
+      code: 'OUTBOUND_RESULT_UNKNOWN',
+      idempotencyKey,
+      error: 'Outbound send result is unknown; will not auto-resend',
+      httpStatus: 409,
+    };
   }
 
   if (!result || !result.success) {
-    store.clearSending(idempotencyKey);
-    return {
-      ...(result || {
+    if (isAmbiguousSendResult(result)) {
+      logOutbound(logger, 'ambiguous_preserved', {
+        accountKey,
+        idempotencyKey,
+      });
+      return {
         success: false,
-        status: 'failed',
-        error: 'send_failed',
-        code: 'SEND_FAILED',
-      }),
+        status: 'unknown',
+        code: 'OUTBOUND_RESULT_UNKNOWN',
+        idempotencyKey,
+        error: (result && result.error)
+          || 'Outbound send result is unknown; will not auto-resend',
+        httpStatus: 409,
+      };
+    }
+
+    if (isDefinitivePreSendFailure(result)) {
+      store.clearSending(idempotencyKey);
+      return {
+        ...(result || {
+          success: false,
+          status: 'failed',
+          error: 'send_failed',
+          code: 'SEND_FAILED',
+        }),
+        idempotencyKey,
+        httpStatus: 409,
+      };
+    }
+
+    // Unclassified failure after reservation: preserve (never auto-resend).
+    logOutbound(logger, 'ambiguous_preserved', {
+      accountKey,
       idempotencyKey,
-      httpStatus: result && result.code === 'NOT_READY' ? 409 : 409,
+    });
+    return {
+      success: false,
+      status: 'unknown',
+      code: 'OUTBOUND_RESULT_UNKNOWN',
+      idempotencyKey,
+      error: (result && result.error)
+        || 'Outbound send result is unknown; will not auto-resend',
+      httpStatus: 409,
     };
   }
 
   const messageId = result.messageId || null;
   if (!messageId) {
-    // Ambiguous: WhatsApp may have accepted without returning an id.
-    logOutbound(logger, 'unknown_result', {
+    logOutbound(logger, 'ambiguous_preserved', {
       accountKey,
       idempotencyKey,
     });
@@ -166,4 +243,6 @@ async function sendManagedWithIdempotency({
 module.exports = {
   sendManagedWithIdempotency,
   validateIdempotencyKey,
+  isAmbiguousSendResult,
+  isDefinitivePreSendFailure,
 };

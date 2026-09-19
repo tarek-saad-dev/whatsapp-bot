@@ -306,6 +306,120 @@ describe('Phase 3B Part 2A managed outbound idempotency', () => {
     const missing = await manager.send('wa_mgr', { phone: '201555', message: 'x' });
     expect(missing.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
+
+  it('2A.1-1/2/3. post-attempt throw preserves SENDING; retry never sends; survives restart', async () => {
+    const filePath = path.join(tmpDir, 'outbound-idempotency.json');
+    const store = createOutboundIdempotencyStore({ filePath });
+    const sendFn = viFn(async () => ({
+      success: false,
+      status: 'unknown',
+      code: 'OUTBOUND_RESULT_UNKNOWN',
+      error: 'socket dropped',
+      sendAttempted: true,
+      outcomeUnknown: true,
+    }));
+    const first = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hello',
+      idempotencyKey: 'key-post-attempt',
+      store,
+      sendFn,
+    });
+    expect(first.code).toBe('OUTBOUND_RESULT_UNKNOWN');
+    expect(store.get('key-post-attempt').state).toBe(STATES.SENDING);
+    expect(sendFn.calls).toBe(1);
+
+    const retry = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hello',
+      idempotencyKey: 'key-post-attempt',
+      store,
+      sendFn,
+    });
+    expect(retry.code).toBe('OUTBOUND_RESULT_UNKNOWN');
+    expect(sendFn.calls).toBe(1);
+
+    const store2 = createOutboundIdempotencyStore({ filePath });
+    const sendFn2 = viFn(async () => ({ success: true, messageId: 'NOPE' }));
+    const afterRestart = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hello',
+      idempotencyKey: 'key-post-attempt',
+      store: store2,
+      sendFn: sendFn2,
+    });
+    expect(afterRestart.code).toBe('OUTBOUND_RESULT_UNKNOWN');
+    expect(sendFn2.calls).toBe(0);
+    expect(store2.get('key-post-attempt').state).toBe(STATES.SENDING);
+  });
+
+  it('2A.1-4. definitive pre-send failure clears reservation for later retry', async () => {
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    const sendFn = viFn(async () => ({
+      success: false,
+      status: 'failed',
+      error: 'invalid_phone',
+      code: 'INVALID_PHONE',
+      sendAttempted: false,
+      outcomeUnknown: false,
+    }));
+    const first = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: 'bad',
+      message: 'hi',
+      idempotencyKey: 'key-definitive',
+      store,
+      sendFn,
+    });
+    expect(first.success).toBe(false);
+    expect(store.get('key-definitive')).toBeNull();
+    expect(sendFn.calls).toBe(1);
+
+    const sendFn2 = viFn(async () => ({
+      success: true,
+      messageId: 'AFTER-RETRY',
+      sendAttempted: true,
+    }));
+    const second = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hi',
+      idempotencyKey: 'key-definitive',
+      store,
+      sendFn: sendFn2,
+    });
+    expect(second.status).toBe('sent');
+    expect(second.messageId).toBe('AFTER-RETRY');
+    expect(sendFn2.calls).toBe(1);
+  });
+
+  it('2A.1-5. SENDING incompatible payload returns IDEMPOTENCY_CONFLICT', async () => {
+    const store = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    store.reserveSending({
+      idempotencyKey: 'key-send-conflict',
+      phone: '201555111111',
+      payloadHash: hashPayload({ phone: '201555111111', message: 'original' }),
+    });
+    const sendFn = viFn(async () => ({ success: true, messageId: 'X' }));
+    const conflict = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'different',
+      idempotencyKey: 'key-send-conflict',
+      store,
+      sendFn,
+    });
+    expect(conflict.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect(sendFn.calls).toBe(0);
+    expect(store.get('key-send-conflict').state).toBe(STATES.SENDING);
+  });
 });
 
 function viFn(impl) {

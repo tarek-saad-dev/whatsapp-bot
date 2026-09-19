@@ -159,4 +159,120 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
     expect(result.ok).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it('2A.1-6/7/8/9. matching fromMe reconciles SENDING → SENT as DRVOWA_API', async () => {
+    const { hashPayload, STATES } = require('../../services/drvowa/outboundIdempotencyStore');
+    const {
+      sendManagedWithIdempotency,
+    } = require('../../services/drvowa/managedOutboundSend');
+
+    const filePath = path.join(tmpDir, 'outbound-idempotency.json');
+    const idem = createOutboundIdempotencyStore({ filePath });
+    const message = 'reconcile me';
+    const phone = '201555111111';
+    idem.reserveSending({
+      idempotencyKey: 'key-recon',
+      phone,
+      payloadHash: hashPayload({ phone, message }),
+    });
+    expect(idem.get('key-recon').state).toBe(STATES.SENDING);
+
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger: { info() {}, warn() {} },
+    });
+    const observed = await observer.observe({
+      providerMessageId: 'RECON-MSG-1',
+      phone,
+      text: message,
+      occurredAt: new Date().toISOString(),
+    });
+    expect(observed.origin).toBe('DRVOWA_API');
+    expect(idem.get('key-recon').state).toBe(STATES.SENT);
+    expect(idem.get('key-recon').providerMessageId).toBe('RECON-MSG-1');
+    expect(idem.isApiOrigin('RECON-MSG-1')).toBe(true);
+
+    const dumped = JSON.stringify(idem.dumpEntries());
+    expect(dumped).not.toContain(message);
+
+    const sendFn = vi.fn(async () => ({ success: true, messageId: 'SHOULD-NOT' }));
+    const replay = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone,
+      message,
+      idempotencyKey: 'key-recon',
+      store: idem,
+      sendFn,
+    });
+    expect(replay.status).toBe('duplicate');
+    expect(replay.messageId).toBe('RECON-MSG-1');
+    expect(sendFn).not.toHaveBeenCalled();
+  });
+
+  it('2A.1-10. nonmatching fromMe remains HUMAN_MANUAL', async () => {
+    const { hashPayload, STATES } = require('../../services/drvowa/outboundIdempotencyStore');
+    const idem = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    idem.reserveSending({
+      idempotencyKey: 'key-other',
+      phone: '201555111111',
+      payloadHash: hashPayload({ phone: '201555111111', message: 'api text' }),
+    });
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger: { info() {}, warn() {} },
+    });
+    const result = await observer.observe({
+      providerMessageId: 'HUMAN-OTHER',
+      phone: '201555111111',
+      text: 'totally different human text',
+      occurredAt: new Date().toISOString(),
+    });
+    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(idem.get('key-other').state).toBe(STATES.SENDING);
+    expect(idem.isApiOrigin('HUMAN-OTHER')).toBe(false);
+  });
+
+  it('2A.1-11. ambiguous multiple candidate match never binds wrong key', async () => {
+    const { hashPayload, STATES } = require('../../services/drvowa/outboundIdempotencyStore');
+    const idem = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    const phone = '201555111111';
+    const message = 'same text';
+    const payloadHash = hashPayload({ phone, message });
+    idem.reserveSending({ idempotencyKey: 'key-a', phone, payloadHash });
+    idem.reserveSending({ idempotencyKey: 'key-b', phone, payloadHash });
+
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger: { info() {}, warn() {} },
+    });
+    const result = await observer.observe({
+      providerMessageId: 'MULTI-1',
+      phone,
+      text: message,
+      occurredAt: new Date().toISOString(),
+    });
+    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(idem.get('key-a').state).toBe(STATES.SENDING);
+    expect(idem.get('key-b').state).toBe(STATES.SENDING);
+    expect(idem.isApiOrigin('MULTI-1')).toBe(false);
+  });
 });
