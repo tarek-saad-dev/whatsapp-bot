@@ -225,6 +225,9 @@ function createBaileysProvider({
       idempotencyKey,
       store: idempotencyStore,
       sendFn: (p, m) => transport.send(p, m),
+      // Fail-safe: queue DRVOWA_API observation from the managed send path.
+      // Baileys does not reliably echo same-socket sends via messages.upsert/fromMe.
+      observeApiOutbound: (payload) => outboundObservedPoster.observe(payload),
       logger,
     });
   }

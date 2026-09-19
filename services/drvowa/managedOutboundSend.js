@@ -54,6 +54,51 @@ function isDefinitivePreSendFailure(result) {
 }
 
 /**
+ * Queue DRVOWA_API outbound observation after a definitive successful send.
+ * Failures here must never change the send result (WhatsApp delivery is authoritative).
+ */
+async function queueApiOutboundObservation({
+  accountKey,
+  phone,
+  message,
+  providerMessageId,
+  observeApiOutbound,
+  logger = console,
+}) {
+  if (typeof observeApiOutbound !== 'function') return;
+  const id = String(providerMessageId || '').trim();
+  if (!id) return;
+
+  try {
+    const result = await observeApiOutbound({
+      providerMessageId: id,
+      phone: phone != null ? String(phone) : null,
+      text: message != null ? String(message) : null,
+      occurredAt: new Date().toISOString(),
+    });
+    if (result && result.ok === false) {
+      logOutbound(logger, 'api_observation_failed', {
+        accountKey,
+        providerMessageId: id,
+        reason: result.reason || 'observe_failed',
+      });
+      return;
+    }
+    logOutbound(logger, 'api_observation_queued', {
+      accountKey,
+      providerMessageId: id,
+      duplicate: Boolean(result && result.duplicate),
+    });
+  } catch (err) {
+    logOutbound(logger, 'api_observation_failed', {
+      accountKey,
+      providerMessageId: id,
+      code: err && err.code ? err.code : 'API_OBS_FAILED',
+    });
+  }
+}
+
+/**
  * Idempotent managed outbound send (must run inside per-account send queue).
  */
 async function sendManagedWithIdempotency({
@@ -63,6 +108,7 @@ async function sendManagedWithIdempotency({
   idempotencyKey: rawKey,
   store,
   sendFn,
+  observeApiOutbound = null,
   logger = console,
 }) {
   const keyCheck = validateIdempotencyKey(rawKey);
@@ -97,6 +143,17 @@ async function sendManagedWithIdempotency({
         idempotencyKey,
         providerMessageId: existing.providerMessageId || null,
       });
+      // Re-queue is idempotent via providerMessageId uniqueness in the spool.
+      if (existing.providerMessageId) {
+        await queueApiOutboundObservation({
+          accountKey,
+          phone,
+          message,
+          providerMessageId: existing.providerMessageId,
+          observeApiOutbound,
+          logger,
+        });
+      }
       return {
         success: true,
         status: 'duplicate',
@@ -227,6 +284,15 @@ async function sendManagedWithIdempotency({
     latencyMs: Date.now() - started,
   });
 
+  await queueApiOutboundObservation({
+    accountKey,
+    phone,
+    message,
+    providerMessageId: messageId,
+    observeApiOutbound,
+    logger,
+  });
+
   return {
     success: true,
     status: 'sent',
@@ -242,6 +308,7 @@ async function sendManagedWithIdempotency({
 
 module.exports = {
   sendManagedWithIdempotency,
+  queueApiOutboundObservation,
   validateIdempotencyKey,
   isAmbiguousSendResult,
   isDefinitivePreSendFailure,

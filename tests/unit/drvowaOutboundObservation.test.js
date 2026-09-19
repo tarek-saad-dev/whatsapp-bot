@@ -276,3 +276,232 @@ describe('Phase 3B Part 2A managed outbound observation', () => {
     expect(idem.isApiOrigin('MULTI-1')).toBe(false);
   });
 });
+
+describe('managed API send path queues DRVOWA_API observation', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drvowa-api-obs-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function harness() {
+    const {
+      sendManagedWithIdempotency,
+    } = require('../../services/drvowa/managedOutboundSend');
+    const idem = createOutboundIdempotencyStore({
+      filePath: path.join(tmpDir, 'outbound-idempotency.json'),
+    });
+    const spool = createOutboundObservationSpool({
+      spoolFile: path.join(tmpDir, 'outbound-observation-spool.json'),
+    });
+    const logs = [];
+    const logger = {
+      info(...args) { logs.push(args); },
+      warn(...args) { logs.push(args); },
+    };
+    const observer = createManagedOutboundObserver({
+      accountKey: 'wa_a',
+      idempotencyStore: idem,
+      observationSpool: spool,
+      logger,
+    });
+    return { sendManagedWithIdempotency, idem, spool, observer, logs, logger };
+  }
+
+  it('successful managed send queues exactly one DRVOWA_API observation', async () => {
+    const { sendManagedWithIdempotency, idem, spool, observer, logs, logger } = harness();
+    const sendFn = vi.fn(async () => ({
+      success: true,
+      status: 'sent',
+      messageId: '3EB014C5C721F3723B90D2',
+    }));
+
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hello api',
+      idempotencyKey: 'ai:job-1',
+      store: idem,
+      sendFn,
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('sent');
+    expect(result.messageId).toBe('3EB014C5C721F3723B90D2');
+    expect(spool.getStats().total).toBe(1);
+    expect(spool.getStats().pending).toBe(1);
+    const pending = spool.getPendingForDelivery();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].providerMessageId).toBe('3EB014C5C721F3723B90D2');
+    expect(pending[0].origin).toBe('DRVOWA_API');
+    expect(logs.some((a) => String(a[0]).includes('api_observation_queued'))).toBe(true);
+  });
+
+  it('duplicate idempotency retry does not create duplicate observation record', async () => {
+    const { sendManagedWithIdempotency, idem, spool, observer, logger } = harness();
+    const sendFn = vi.fn(async () => ({
+      success: true,
+      messageId: '3EB0E4F5786EEBBD25AC72',
+    }));
+
+    await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hello',
+      idempotencyKey: 'ai:job-2',
+      store: idem,
+      sendFn,
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+    expect(spool.getStats().total).toBe(1);
+
+    const dup = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'hello',
+      idempotencyKey: 'ai:job-2',
+      store: idem,
+      sendFn,
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+    expect(dup.status).toBe('duplicate');
+    expect(sendFn).toHaveBeenCalledTimes(1);
+    expect(spool.getStats().total).toBe(1);
+    expect(spool.getPendingForDelivery()[0].origin).toBe('DRVOWA_API');
+  });
+
+  it('later messages.upsert fromMe echo stays one DRVOWA_API observation', async () => {
+    const { sendManagedWithIdempotency, idem, spool, observer, logger } = harness();
+    const providerMessageId = '3EB04BB55F2A17E5DF3CD8';
+
+    await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'echo later',
+      idempotencyKey: 'ai:job-3',
+      store: idem,
+      sendFn: async () => ({ success: true, messageId: providerMessageId }),
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+    expect(spool.getStats().total).toBe(1);
+
+    // Baileys later echoes the same fromMe message
+    const echo = await observer.observe({
+      providerMessageId,
+      phone: '201555111111',
+      text: 'echo later',
+      occurredAt: new Date().toISOString(),
+    });
+    expect(echo.origin).toBe('DRVOWA_API');
+    expect(echo.duplicate).toBe(true);
+    expect(spool.getStats().total).toBe(1);
+    expect(spool.getPendingForDelivery()[0].origin).toBe('DRVOWA_API');
+  });
+
+  it('manual fromMe outbound with unknown providerMessageId is HUMAN_MANUAL', async () => {
+    const { spool, observer } = harness();
+    const result = await observer.observe({
+      providerMessageId: '2AEE5405DD992F08FA25',
+      phone: '201555111111',
+      text: 'typed on phone',
+      occurredAt: new Date().toISOString(),
+    });
+    expect(result.origin).toBe('HUMAN_MANUAL');
+    expect(spool.getStats().total).toBe(1);
+    expect(spool.getPendingForDelivery()[0].origin).toBe('HUMAN_MANUAL');
+  });
+
+  it('ambiguous send queues no observation', async () => {
+    const { sendManagedWithIdempotency, idem, spool, observer, logger } = harness();
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'maybe',
+      idempotencyKey: 'ai:ambiguous',
+      store: idem,
+      sendFn: async () => ({
+        success: false,
+        outcomeUnknown: true,
+        code: 'OUTBOUND_RESULT_UNKNOWN',
+        error: 'unknown',
+      }),
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+    expect(result.status).toBe('unknown');
+    expect(spool.getStats().total).toBe(0);
+  });
+
+  it('definitive failure queues no observation', async () => {
+    const { sendManagedWithIdempotency, idem, spool, observer, logger } = harness();
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'nope',
+      idempotencyKey: 'ai:fail',
+      store: idem,
+      sendFn: async () => ({
+        success: false,
+        sendAttempted: false,
+        code: 'NOT_READY',
+        error: 'Account is not READY',
+      }),
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('NOT_READY');
+    expect(spool.getStats().total).toBe(0);
+  });
+
+  it('observer/spool failure after successful send still returns success', async () => {
+    const { sendManagedWithIdempotency, idem, logs, logger } = harness();
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'sent anyway',
+      idempotencyKey: 'ai:obs-fail',
+      store: idem,
+      sendFn: async () => ({
+        success: true,
+        messageId: '3EB0OBSFAIL0000000001',
+      }),
+      observeApiOutbound: async () => {
+        throw new Error('spool disk full');
+      },
+      logger,
+    });
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('sent');
+    expect(result.messageId).toBe('3EB0OBSFAIL0000000001');
+    expect(logs.some((a) => String(a[0]).includes('api_observation_failed'))).toBe(true);
+    // Must not log message text
+    const flat = JSON.stringify(logs);
+    expect(flat).not.toContain('sent anyway');
+  });
+
+  it('success without providerMessageId queues no observation', async () => {
+    const { sendManagedWithIdempotency, idem, spool, observer, logger } = harness();
+    const result = await sendManagedWithIdempotency({
+      accountKey: 'wa_a',
+      phone: '201555111111',
+      message: 'no id',
+      idempotencyKey: 'ai:noid',
+      store: idem,
+      sendFn: async () => ({ success: true, messageId: null }),
+      observeApiOutbound: (payload) => observer.observe(payload),
+      logger,
+    });
+    expect(result.status).toBe('unknown');
+    expect(spool.getStats().total).toBe(0);
+  });
+});
