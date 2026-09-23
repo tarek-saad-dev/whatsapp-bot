@@ -284,6 +284,8 @@ function createBaileysProvider({
           emptyContent: capture?.emptyContent ?? 0,
           quarantined: capture?.quarantined ?? 0,
           pendingLid: capture?.pendingLid ?? 0,
+          pendingDecrypt: capture?.pendingDecrypt ?? 0,
+          durableQuarantine: capture?.durableQuarantine ?? 0,
           listening: Boolean(inbox?.listening),
           lastEventAt: inbox?.lastPollAt || null,
         };

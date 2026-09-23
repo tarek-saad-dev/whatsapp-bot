@@ -3,7 +3,7 @@
 const { normalizeMessageContent, getContentType } = require('@whiskeysockets/baileys');
 const { isLidUser } = require('@whiskeysockets/baileys/lib/WABinary/jid-utils');
 
-const LIVE_UPSERT_TYPE = 'notify';
+const LIVE_UPSERT_TYPES = new Set(['notify', 'append']);
 
 const BLOCKED_JID_SUFFIXES = [
     '@broadcast',
@@ -12,7 +12,9 @@ const BLOCKED_JID_SUFFIXES = [
 ];
 
 function isLiveUpsertType(type) {
-    return String(type || '') === LIVE_UPSERT_TYPE;
+    // notify = live push; append = offline / decrypt-retry / placeholder resend
+    // (Baileys 6.7.x upsertMessage(..., offline ? 'append' : 'notify')).
+    return LIVE_UPSERT_TYPES.has(String(type || ''));
 }
 
 function isBlockedRemoteJid(remoteJid) {
@@ -301,7 +303,7 @@ function mapBaileysInbound(msg, {
         baileysKey: key,
         transport: 'baileys',
         messageTimestamp: receivedIso,
-        upsertType: LIVE_UPSERT_TYPE,
+        upsertType: 'notify',
         sourceRemoteJid: remoteJid,
         resolvedCustomerJid: customerJid,
     };
@@ -416,7 +418,8 @@ function mapBaileysOutboundObserved(msg, {
 }
 
 module.exports = {
-    LIVE_UPSERT_TYPE,
+    LIVE_UPSERT_TYPE: 'notify',
+    LIVE_UPSERT_TYPES,
     isLiveUpsertType,
     isBlockedRemoteJid,
     isGroupJid,

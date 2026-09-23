@@ -42,11 +42,12 @@ function makeInboundMsg({
 }
 
 describe('baileysMessageAdapter', () => {
-    it('accepts only notify upserts as live traffic', () => {
+    it('accepts notify and append upserts as live traffic', () => {
         expect(isLiveUpsertType('notify')).toBe(true);
-        expect(isLiveUpsertType('append')).toBe(false);
+        expect(isLiveUpsertType('append')).toBe(true);
         expect(shouldProcessUpsert({ type: 'notify' }).accept).toBe(true);
-        expect(shouldProcessUpsert({ type: 'append' }).accept).toBe(false);
+        expect(shouldProcessUpsert({ type: 'append' }).accept).toBe(true);
+        expect(shouldProcessUpsert({ type: 'prepend' }).accept).toBe(false);
     });
 
     it('ignores fromMe outbound messages', () => {

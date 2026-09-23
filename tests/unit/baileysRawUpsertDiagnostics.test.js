@@ -150,24 +150,55 @@ describe('baileys raw upsert diagnostics', () => {
         await transport.stop();
     });
 
-    it('append upsert → baileys_upsert_ignored per message', async () => {
+    it('append upsert with content → capture (decrypt-retry / offline path)', async () => {
         const { transport, socket } = await createTestTransport();
         logCapture.lines.length = 0;
 
         socket.ev.emit('messages.upsert', {
             type: 'append',
             messages: [
-                makeInboundMsg({ id: 'APP1', text: 'history one' }),
-                makeInboundMsg({ id: 'APP2', text: 'history two' }),
+                makeInboundMsg({ id: 'APP1', text: 'retry content one' }),
+                makeInboundMsg({ id: 'APP2', text: 'retry content two' }),
             ],
         });
         await new Promise((r) => setImmediate(r));
 
-        const ignored = logCapture.lines.filter((l) => l.includes('baileys_upsert_ignored'));
-        expect(ignored).toHaveLength(2);
-        expect(ignored.every((l) => l.includes('reason=not_live_notify'))).toBe(true);
-        expect(transport.spool.listRecent(10)).toHaveLength(0);
+        expect(logCapture.lines.filter((l) => l.includes('baileys_captured'))).toHaveLength(2);
+        expect(transport.spool.listRecent(10)).toHaveLength(2);
         await transport.stop();
+    });
+
+    it('CIPHERTEXT notify then append content → capture (not permanent decrypt drop)', async () => {
+        const prev = process.env.BAILEYS_DECRYPT_PENDING_MS;
+        process.env.BAILEYS_DECRYPT_PENDING_MS = '2000';
+        try {
+            const { transport, socket } = await createTestTransport();
+            logCapture.lines.length = 0;
+
+            const cipher = makeInboundMsg({ id: 'DECAPP1', text: 'opaque' });
+            cipher.messageStubType = 2;
+            socket.ev.emit('messages.upsert', {
+                type: 'notify',
+                messages: [cipher],
+            });
+            await new Promise((r) => setImmediate(r));
+            expect(logCapture.lines.some((l) => l.includes('baileys_inbound_decrypt_pending'))).toBe(true);
+            expect(transport.spool.listRecent(10)).toHaveLength(0);
+
+            socket.ev.emit('messages.upsert', {
+                type: 'append',
+                messages: [makeInboundMsg({ id: 'DECAPP1', text: 'decrypted body' })],
+            });
+            await new Promise((r) => setImmediate(r));
+
+            expect(logCapture.lines.some((l) => l.includes('baileys_inbound_decrypt_resolved'))).toBe(true);
+            expect(logCapture.lines.some((l) => l.includes('baileys_captured'))).toBe(true);
+            expect(transport.spool.listRecent(10)).toHaveLength(1);
+            await transport.stop();
+        } finally {
+            if (prev === undefined) delete process.env.BAILEYS_DECRYPT_PENDING_MS;
+            else process.env.BAILEYS_DECRYPT_PENDING_MS = prev;
+        }
     });
 
     it('unresolved LID → pending then quarantine on timeout (not silent drop)', async () => {
@@ -273,24 +304,38 @@ describe('baileys raw upsert diagnostics', () => {
         await transport.stop();
     });
 
-    it('CIPHERTEXT stub → decrypt_failed counter (not silent)', async () => {
-        const { transport, socket } = await createTestTransport();
-        logCapture.lines.length = 0;
+    it('CIPHERTEXT stub → decrypt_pending (not immediate permanent fail)', async () => {
+        const prev = process.env.BAILEYS_DECRYPT_PENDING_MS;
+        process.env.BAILEYS_DECRYPT_PENDING_MS = '40';
+        try {
+            const { transport, socket } = await createTestTransport();
+            logCapture.lines.length = 0;
 
-        const msg = makeInboundMsg({ id: 'DEC1', text: 'opaque' });
-        msg.messageStubType = 2; // StubType.CIPHERTEXT
-        socket.ev.emit('messages.upsert', {
-            type: 'notify',
-            messages: [msg],
-        });
-        await new Promise((r) => setImmediate(r));
+            const msg = makeInboundMsg({ id: 'DEC1', text: 'opaque' });
+            msg.messageStubType = 2; // StubType.CIPHERTEXT
+            socket.ev.emit('messages.upsert', {
+                type: 'notify',
+                messages: [msg],
+            });
+            await new Promise((r) => setImmediate(r));
 
-        expect(logCapture.lines.some((l) =>
-            l.includes('baileys_inbound_ignored') && l.includes('reason=decrypt_failed'),
-        )).toBe(true);
-        expect(transport.getInboxStatus().inboundCapture.decryptFailed).toBeGreaterThanOrEqual(1);
-        expect(transport.spool.listRecent(10)).toHaveLength(0);
-        await transport.stop();
+            expect(logCapture.lines.some((l) =>
+                l.includes('baileys_inbound_decrypt_pending'),
+            )).toBe(true);
+            expect(transport.getInboxStatus().inboundCapture.pendingDecrypt).toBeGreaterThanOrEqual(1);
+            expect(transport.spool.listRecent(10)).toHaveLength(0);
+
+            await new Promise((r) => setTimeout(r, 80));
+            expect(logCapture.lines.some((l) =>
+                l.includes('baileys_inbound_quarantined')
+                && l.includes('reason=decrypt_timeout'),
+            )).toBe(true);
+            expect(transport.getInboxStatus().inboundCapture.decryptFailed).toBeGreaterThanOrEqual(1);
+            await transport.stop();
+        } finally {
+            if (prev === undefined) delete process.env.BAILEYS_DECRYPT_PENDING_MS;
+            else process.env.BAILEYS_DECRYPT_PENDING_MS = prev;
+        }
     });
 
     it('protocol/system message → baileys_inbound_ignored', async () => {

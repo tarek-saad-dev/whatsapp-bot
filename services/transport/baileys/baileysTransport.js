@@ -25,6 +25,7 @@ const {
 const { createLidMappingStore } = require('./lidMappingStore');
 const { createOutboundMessageStore } = require('./outboundMessageStore');
 const { createUnresolvedLidPendingBuffer } = require('./unresolvedLidPending');
+const { createInboundQuarantineStore } = require('./inboundQuarantineStore');
 const { resolveOutboundJid } = require('./resolveOutboundJid');
 const { createOutboundObservedPoster } = require('../../inbox/outboundObservedPoster');
 const {
@@ -40,6 +41,7 @@ const LID_MAP_FILE = process.env.BAILEYS_LID_MAP_FILE
 function createBaileysTransport({
     authDir = AUTH_DIR,
     lidMapFile = LID_MAP_FILE,
+    quarantineFile = null,
     spool = createInboxSpool(),
     deliveryWorker = null,
     outboundObservedPoster = null,
@@ -60,6 +62,9 @@ function createBaileysTransport({
     const worker = deliveryWorker || createInboxDeliveryWorker({ spool });
     const outboundPoster = outboundObservedPoster || createOutboundObservedPoster();
     const messageStore = outboundStore || createOutboundMessageStore();
+    const inboundQuarantine = createInboundQuarantineStore({
+        filePath: quarantineFile || path.join(authDir, 'inbound-quarantine.json'),
+    });
     let sock = null;
     let saveCredsFn = null;
     let ready = false;
@@ -102,10 +107,17 @@ function createBaileysTransport({
     const lidStore = createLidMappingStore({ mapFile: lidMapFile });
     const lidCache = createLidPhoneCache(lidStore);
     const lidPending = createUnresolvedLidPendingBuffer();
+    const decryptPending = createUnresolvedLidPendingBuffer({
+        timeoutMs: Number(process.env.BAILEYS_DECRYPT_PENDING_MS || 15000),
+        retryOffsetsMs: (process.env.BAILEYS_DECRYPT_RETRY_OFFSETS_MS || '0,1000,3000,6000,10000')
+            .split(',')
+            .map((s) => Number(String(s).trim()))
+            .filter((n) => Number.isFinite(n) && n >= 0),
+    });
 
     function bumpLidLearned() {
-        // Re-try any buffered @lid messages now that a mapping may exist.
         void reprocessPendingLidMessages();
+        void reprocessDurableQuarantine({ reason: 'lid_mapping_learned' });
     }
 
     const _rememberPn = lidCache.rememberPn.bind(lidCache);
@@ -189,6 +201,8 @@ function createBaileysTransport({
                 emptyContent: emptyContentCount,
                 quarantined: inboundQuarantinedCount,
                 pendingLid: lidPending.size(),
+                pendingDecrypt: decryptPending.size(),
+                durableQuarantine: inboundQuarantine.size(),
             },
         };
     }
@@ -333,13 +347,63 @@ function createBaileysTransport({
 
     function quarantineInbound(msg, reason, extra = {}) {
         inboundQuarantinedCount += 1;
+        const messageId = String(msg?.key?.id || '').trim();
+        const remoteJid = msg?.key?.remoteJid || null;
+        const senderPn = msg?.key?.senderPn || msg?.key?.participantPn || null;
         logInbox('baileys_inbound_quarantined', {
             reason,
-            messageId: msg?.key?.id || null,
-            remoteJid: msg?.key?.remoteJid || null,
-            senderPn: msg?.key?.senderPn || msg?.key?.participantPn || null,
+            messageId: messageId || null,
+            remoteJid,
+            senderPn,
             ...extra,
         });
+        if (!messageId || !msg) return;
+        inboundQuarantine.put({
+            messageId,
+            providerMessageId: null,
+            remoteLid: String(remoteJid || '').endsWith('@lid') ? remoteJid : null,
+            remoteJid,
+            senderPn,
+            upsertType: extra.upsertType || 'notify',
+            messageTimestamp: msg.messageTimestamp || null,
+            reason,
+            attempts: Number(extra.attempts) || 0,
+            msg,
+        });
+    }
+
+    /**
+     * Active LID→PN resolution using sources supported by Baileys 6.7.24:
+     * - key.senderPn / participantPn
+     * - persisted lidCache / contacts / chats.phoneNumberShare
+     * There is NO getPNForLID on signalRepository in 6.7.24.
+     * USyncLIDProtocol is PN→LID only (onWhatsApp).
+     */
+    function tryResolveLidNative(msg) {
+        const key = msg?.key || {};
+        const remoteJid = String(key.remoteJid || '').trim();
+        const senderPn = String(key.senderPn || key.participantPn || '').trim();
+        const tried = [];
+
+        if (senderPn && (senderPn.endsWith('@s.whatsapp.net') || senderPn.endsWith('@c.us'))) {
+            tried.push('key.senderPn');
+            if (remoteJid.endsWith('@lid')) {
+                lidCache.rememberPn(remoteJid, senderPn, 'active.senderPn');
+            }
+            return { resolved: true, pnJid: senderPn, source: 'key.senderPn', tried };
+        }
+
+        tried.push('lidCache.resolvePn');
+        if (remoteJid.endsWith('@lid')) {
+            const mapped = lidCache.resolvePn(remoteJid);
+            if (mapped) {
+                return { resolved: true, pnJid: mapped, source: 'lidCache', tried };
+            }
+        }
+
+        tried.push('baileys.USyncLIDProtocol(pn_to_lid_only)');
+        tried.push('signalRepository.getPNForLID(absent_in_6.7.24)');
+        return { resolved: false, pnJid: null, source: null, tried };
     }
 
     async function captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt) {
@@ -370,6 +434,14 @@ function createBaileysTransport({
         lastEventAt = captureCompletedAt;
         lastCapturedCount += 1;
         lastError = null;
+
+        // Clear any pending/quarantine twin for this id.
+        const mid = String(msg?.key?.id || '').trim();
+        if (mid) {
+            if (lidPending.has(mid)) lidPending.take(mid);
+            if (decryptPending.has(mid)) decryptPending.take(mid);
+            inboundQuarantine.remove(mid);
+        }
 
         logInbox('baileys_captured', {
             providerMessageId: mapped.providerMessageId,
@@ -408,22 +480,57 @@ function createBaileysTransport({
     function enqueueUnresolvedLid(msg, upsert) {
         const messageId = String(msg?.key?.id || '').trim();
         unresolvedLidCount += 1;
-        if (!messageId) {
-            quarantineInbound(msg, 'unresolved_lid_missing_id');
-            return;
+
+        // Immediate active resolve before buffering.
+        const native = tryResolveLidNative(msg);
+        if (native.resolved) {
+            logInbox('baileys_inbound_lid_native_resolved', {
+                messageId: messageId || null,
+                source: native.source,
+                remoteJid: msg?.key?.remoteJid || null,
+            });
+            return 'retry_map';
         }
+
+        if (!messageId) {
+            quarantineInbound(msg, 'unresolved_lid_missing_id', { upsertType: upsert?.type });
+            return 'quarantined';
+        }
+
         const result = lidPending.enqueue(
             messageId,
-            { msg, upsertType: upsert?.type || 'notify' },
-            (entry) => {
-                quarantineInbound(entry.msg, 'unresolved_lid_timeout', {
-                    pendingMs: lidPending.timeoutMs,
-                });
+            { msg, upsertType: upsert?.type || 'notify', reason: 'unresolved_lid' },
+            {
+                onTimeout: (entry) => {
+                    quarantineInbound(entry.msg, 'unresolved_lid_timeout', {
+                        pendingMs: lidPending.timeoutMs,
+                        upsertType: entry.upsertType,
+                    });
+                },
+                onRetry: (entry) => {
+                    const again = tryResolveLidNative(entry.msg);
+                    if (!again.resolved) {
+                        logInbox('baileys_inbound_lid_resolve_retry', {
+                            messageId,
+                            tried: (again.tried || []).join(','),
+                            pendingLid: lidPending.size(),
+                        });
+                        return;
+                    }
+                    logInbox('baileys_inbound_lid_native_resolved', {
+                        messageId,
+                        source: again.source,
+                        via: 'pending_retry',
+                    });
+                    void reprocessPendingLidMessages();
+                },
             },
         );
         if (!result.ok) {
-            quarantineInbound(msg, result.reason || 'unresolved_lid_buffer_full');
-            return;
+            quarantineInbound(msg, result.reason || 'unresolved_lid_buffer_full', {
+                upsertType: upsert?.type,
+            });
+            return 'quarantined';
         }
         if (result.duplicate) {
             logInbox('baileys_inbound_ignored', {
@@ -431,13 +538,69 @@ function createBaileysTransport({
                 messageId,
                 remoteJid: msg?.key?.remoteJid || null,
             });
-            return;
+            return 'pending';
         }
         logInbox('baileys_inbound_lid_pending', {
             messageId,
             remoteJid: msg?.key?.remoteJid || null,
             timeoutMs: lidPending.timeoutMs,
             pendingLid: lidPending.size(),
+            nativeTried: (native.tried || []).join(','),
+        });
+        return 'pending';
+    }
+
+    function enqueueDecryptPending(msg, upsert) {
+        const messageId = String(msg?.key?.id || '').trim();
+        // Learn LID mapping from ciphertext envelope when senderPn is present.
+        tryResolveLidNative(msg);
+
+        if (!messageId) {
+            decryptFailedCount += 1;
+            quarantineInbound(msg, 'decrypt_failed_missing_id', { upsertType: upsert?.type });
+            return;
+        }
+
+        const result = decryptPending.enqueue(
+            messageId,
+            { msg, upsertType: upsert?.type || 'notify', reason: 'decrypt_pending' },
+            {
+                onTimeout: (entry) => {
+                    decryptFailedCount += 1;
+                    quarantineInbound(entry.msg, 'decrypt_timeout', {
+                        pendingMs: decryptPending.timeoutMs,
+                        upsertType: entry.upsertType,
+                    });
+                },
+                onRetry: () => {
+                    logInbox('baileys_inbound_decrypt_wait', {
+                        messageId,
+                        pendingDecrypt: decryptPending.size(),
+                    });
+                },
+            },
+        );
+        if (!result.ok) {
+            decryptFailedCount += 1;
+            quarantineInbound(msg, result.reason || 'decrypt_pending_buffer_full', {
+                upsertType: upsert?.type,
+            });
+            return;
+        }
+        if (result.duplicate) {
+            logInbox('baileys_inbound_ignored', {
+                reason: 'decrypt_pending_duplicate',
+                messageId,
+                remoteJid: msg?.key?.remoteJid || null,
+            });
+            return;
+        }
+        logInbox('baileys_inbound_decrypt_pending', {
+            messageId,
+            remoteJid: msg?.key?.remoteJid || null,
+            senderPn: msg?.key?.senderPn || msg?.key?.participantPn || null,
+            timeoutMs: decryptPending.timeoutMs,
+            pendingDecrypt: decryptPending.size(),
         });
     }
 
@@ -445,6 +608,7 @@ function createBaileysTransport({
         const snapshot = lidPending.list();
         if (snapshot.length === 0) return;
         for (const item of snapshot) {
+            tryResolveLidNative(item.msg);
             const mapped = mapBaileysInbound(item.msg, { includeGroups, seenKeys, lidCache });
             if (mapped.action !== 'capture') continue;
             const taken = lidPending.take(item.messageId);
@@ -453,6 +617,40 @@ function createBaileysTransport({
                 messageId: item.messageId,
                 remoteJid: item.msg?.key?.remoteJid || null,
                 waitMs: Date.now() - (taken.enqueuedAt || Date.now()),
+            });
+            await captureMappedInbound(
+                item.msg,
+                mapped,
+                { type: item.upsertType || 'notify' },
+                utcNow(),
+                utcNow(),
+            );
+        }
+    }
+
+    async function reprocessDurableQuarantine({ reason } = {}) {
+        const items = inboundQuarantine.list();
+        if (items.length === 0) return;
+        for (const item of items) {
+            if (!item.msg) {
+                inboundQuarantine.remove(item.messageId);
+                continue;
+            }
+            // Still ciphertext? keep waiting for a later upsert with content.
+            const stubType = Number(item.msg?.messageStubType);
+            if (stubType === 2 || stubType === 47) continue;
+
+            tryResolveLidNative(item.msg);
+            const mapped = mapBaileysInbound(item.msg, { includeGroups, seenKeys, lidCache });
+            if (mapped.action !== 'capture') {
+                inboundQuarantine.bumpAttempt(item.messageId);
+                continue;
+            }
+            inboundQuarantine.remove(item.messageId);
+            logInbox('baileys_inbound_quarantine_reprocessed', {
+                messageId: item.messageId,
+                reason: reason || 'mapping_available',
+                originalReason: item.reason,
             });
             await captureMappedInbound(
                 item.msg,
@@ -522,18 +720,30 @@ function createBaileysTransport({
                 continue;
             }
 
-            // CIPHERTEXT stub = decrypt failure (Baileys StubType.CIPHERTEXT = 2)
+            // CIPHERTEXT stub = decrypt not yet available. Wait for Baileys retry upsert
+            // (often type=append) instead of permanently dropping.
             const stubType = Number(msg?.messageStubType);
             if (stubType === 2 || stubType === 47) {
-                decryptFailedCount += 1;
-                logInbox('baileys_inbound_ignored', {
-                    reason: 'decrypt_failed',
-                    messageId: msg?.key?.id || null,
-                    remoteJid: msg?.key?.remoteJid || null,
-                    stubType,
-                });
+                enqueueDecryptPending(msg, upsert);
                 continue;
             }
+
+            // Successful content for a decrypt-pending id → clear pending and continue.
+            const mid = String(msg?.key?.id || '').trim();
+            if (mid && decryptPending.has(mid)) {
+                decryptPending.take(mid);
+                logInbox('baileys_inbound_decrypt_resolved', {
+                    messageId: mid,
+                    upsertType: upsert?.type || null,
+                });
+            }
+
+            const lidOutcome = (() => {
+                // Pre-resolve LID before mapping so mapBaileysInbound sees PN.
+                const native = tryResolveLidNative(msg);
+                return native;
+            })();
+            void lidOutcome;
 
             const mapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
             if (mapped.action === 'duplicate') {
@@ -547,7 +757,13 @@ function createBaileysTransport({
             }
             if (mapped.action !== 'capture') {
                 if (mapped.reason === 'unresolved_lid') {
-                    enqueueUnresolvedLid(msg, upsert);
+                    const outcome = enqueueUnresolvedLid(msg, upsert);
+                    if (outcome === 'retry_map') {
+                        const remapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
+                        if (remapped.action === 'capture') {
+                            await captureMappedInbound(msg, remapped, upsert, waDetectedAt, captureStartedAt);
+                        }
+                    }
                     continue;
                 }
                 if (mapped.reason === 'empty_content') {
@@ -558,13 +774,14 @@ function createBaileysTransport({
                     remoteJid: mapped.remoteJid,
                     customerJid: mapped.customerJid,
                     messageId: msg?.key?.id || null,
+                    upsertType: upsert?.type || null,
                 });
                 continue;
             }
 
             // Mapping arrived; drop any pending twin for same id.
-            if (msg?.key?.id && lidPending.has(msg.key.id)) {
-                lidPending.take(msg.key.id);
+            if (mid && lidPending.has(mid)) {
+                lidPending.take(mid);
             }
 
             await captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt);
@@ -751,6 +968,7 @@ function createBaileysTransport({
         ready = false;
         worker.stop();
         lidPending.clear();
+        decryptPending.clear();
         clearReconnectTimer();
         await teardownSocket();
         return getStatus();
