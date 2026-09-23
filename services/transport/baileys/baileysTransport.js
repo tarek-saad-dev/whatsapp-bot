@@ -24,6 +24,7 @@ const {
 } = require('./baileysMessageAdapter');
 const { createLidMappingStore } = require('./lidMappingStore');
 const { createOutboundMessageStore } = require('./outboundMessageStore');
+const { createUnresolvedLidPendingBuffer } = require('./unresolvedLidPending');
 const { resolveOutboundJid } = require('./resolveOutboundJid');
 const { createOutboundObservedPoster } = require('../../inbox/outboundObservedPoster');
 const {
@@ -71,6 +72,10 @@ function createBaileysTransport({
     let lastCapturedCount = 0;
     let reconnectAttempts = 0;
     let unresolvedLidCount = 0;
+    let rawUpsertCount = 0;
+    let emptyContentCount = 0;
+    let inboundQuarantinedCount = 0;
+    let decryptFailedCount = 0;
     let lastConnectedAt = null;
     let lastDisconnectAt = null;
     let stopping = false;
@@ -96,6 +101,29 @@ function createBaileysTransport({
     const seenOutboundKeys = new Set();
     const lidStore = createLidMappingStore({ mapFile: lidMapFile });
     const lidCache = createLidPhoneCache(lidStore);
+    const lidPending = createUnresolvedLidPendingBuffer();
+
+    function bumpLidLearned() {
+        // Re-try any buffered @lid messages now that a mapping may exist.
+        void reprocessPendingLidMessages();
+    }
+
+    const _rememberPn = lidCache.rememberPn.bind(lidCache);
+    lidCache.rememberPn = (lidJid, pnJid, source) => {
+        const changed = _rememberPn(lidJid, pnJid, source);
+        if (changed) bumpLidLearned();
+        return changed;
+    };
+    const _rememberContact = lidCache.rememberContact.bind(lidCache);
+    lidCache.rememberContact = (contact, source) => {
+        _rememberContact(contact, source);
+        bumpLidLearned();
+    };
+    const _rememberChat = lidCache.rememberChat.bind(lidCache);
+    lidCache.rememberChat = (chat, source) => {
+        _rememberChat(chat, source);
+        bumpLidLearned();
+    };
 
     function getCurrentSocketListenerCounts() {
         if (sock && sock.ev && typeof sock.ev.listenerCount === 'function') {
@@ -153,6 +181,15 @@ function createBaileysTransport({
             deliveryWorker: worker.getStatus(),
             count: deliveryStats.pending + deliveryStats.delivered + deliveryStats.failedOrRetrying,
             lastText: recent[0] ? recent[0].text : null,
+            inboundCapture: {
+                rawUpsert: rawUpsertCount,
+                captured: lastCapturedCount,
+                unresolvedLid: unresolvedLidCount,
+                decryptFailed: decryptFailedCount,
+                emptyContent: emptyContentCount,
+                quarantined: inboundQuarantinedCount,
+                pendingLid: lidPending.size(),
+            },
         };
     }
 
@@ -261,6 +298,7 @@ function createBaileysTransport({
 
     function logRawUpsert(upsert, generation) {
         const messages = upsert?.messages || [];
+        rawUpsertCount += 1;
         const sample = messages.slice(0, 5).map((msg) => buildRawUpsertSample(msg));
         logInbox('baileys_raw_upsert', {
             generation,
@@ -290,6 +328,139 @@ function createBaileysTransport({
                 senderPn: key.senderPn || key.participantPn || null,
                 fromMe: Boolean(key.fromMe),
             });
+        }
+    }
+
+    function quarantineInbound(msg, reason, extra = {}) {
+        inboundQuarantinedCount += 1;
+        logInbox('baileys_inbound_quarantined', {
+            reason,
+            messageId: msg?.key?.id || null,
+            remoteJid: msg?.key?.remoteJid || null,
+            senderPn: msg?.key?.senderPn || msg?.key?.participantPn || null,
+            ...extra,
+        });
+    }
+
+    async function captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt) {
+        const captureCompletedAt = utcNow();
+        const msgTsMs = Number(msg.messageTimestamp)
+            ? Number(msg.messageTimestamp) * 1000
+            : Date.parse(waDetectedAt);
+        const timing = {
+            waDetectedAt,
+            captureStartedAt,
+            captureCompletedAt,
+            captureLatencyMs: isoBetween(captureStartedAt, captureCompletedAt),
+            endToEndLatencyMs: Math.max(0, Date.parse(captureCompletedAt) - msgTsMs),
+            browserQueueWaitMs: 0,
+            browserOperationMs: 0,
+        };
+
+        if (spool.hasProviderMessageId(mapped.providerMessageId)) {
+            logInbox('baileys_inbound_ignored', {
+                reason: 'spool_duplicate',
+                providerMessageId: mapped.providerMessageId,
+                messageId: msg?.key?.id || null,
+            });
+            return;
+        }
+
+        spool.capture(mapped.normalized, { timing });
+        lastEventAt = captureCompletedAt;
+        lastCapturedCount += 1;
+        lastError = null;
+
+        logInbox('baileys_captured', {
+            providerMessageId: mapped.providerMessageId,
+            phone: mapped.phone,
+            captureLatencyMs: timing.captureLatencyMs,
+        });
+
+        if (typeof onLiveInbound === 'function') {
+            try {
+                onLiveInbound({
+                    providerMessageId: mapped.providerMessageId,
+                    externalContactKey: mapped.phone || mapped.normalized?.phone || null,
+                    fromMe: false,
+                    isGroup: Boolean(mapped.normalized?.isGroup),
+                    messageTimestamp: mapped.normalized?.messageTimestamp
+                        || msg.messageTimestamp
+                        || null,
+                    receivedAt: captureCompletedAt,
+                    upsertType: upsert?.type || 'notify',
+                    content: mapped.normalized?.text
+                        || mapped.normalized?.content
+                        || mapped.normalized
+                        || null,
+                    normalized: mapped.normalized,
+                });
+            } catch (hookErr) {
+                logger.error('[baileys] onLiveInbound_failed', {
+                    error: hookErr && hookErr.message ? hookErr.message : String(hookErr),
+                });
+            }
+        }
+
+        await worker.tick();
+    }
+
+    function enqueueUnresolvedLid(msg, upsert) {
+        const messageId = String(msg?.key?.id || '').trim();
+        unresolvedLidCount += 1;
+        if (!messageId) {
+            quarantineInbound(msg, 'unresolved_lid_missing_id');
+            return;
+        }
+        const result = lidPending.enqueue(
+            messageId,
+            { msg, upsertType: upsert?.type || 'notify' },
+            (entry) => {
+                quarantineInbound(entry.msg, 'unresolved_lid_timeout', {
+                    pendingMs: lidPending.timeoutMs,
+                });
+            },
+        );
+        if (!result.ok) {
+            quarantineInbound(msg, result.reason || 'unresolved_lid_buffer_full');
+            return;
+        }
+        if (result.duplicate) {
+            logInbox('baileys_inbound_ignored', {
+                reason: 'unresolved_lid_pending_duplicate',
+                messageId,
+                remoteJid: msg?.key?.remoteJid || null,
+            });
+            return;
+        }
+        logInbox('baileys_inbound_lid_pending', {
+            messageId,
+            remoteJid: msg?.key?.remoteJid || null,
+            timeoutMs: lidPending.timeoutMs,
+            pendingLid: lidPending.size(),
+        });
+    }
+
+    async function reprocessPendingLidMessages() {
+        const snapshot = lidPending.list();
+        if (snapshot.length === 0) return;
+        for (const item of snapshot) {
+            const mapped = mapBaileysInbound(item.msg, { includeGroups, seenKeys, lidCache });
+            if (mapped.action !== 'capture') continue;
+            const taken = lidPending.take(item.messageId);
+            if (!taken) continue;
+            logInbox('baileys_inbound_lid_resolved', {
+                messageId: item.messageId,
+                remoteJid: item.msg?.key?.remoteJid || null,
+                waitMs: Date.now() - (taken.enqueuedAt || Date.now()),
+            });
+            await captureMappedInbound(
+                item.msg,
+                mapped,
+                { type: item.upsertType || 'notify' },
+                utcNow(),
+                utcNow(),
+            );
         }
     }
 
@@ -351,6 +522,19 @@ function createBaileysTransport({
                 continue;
             }
 
+            // CIPHERTEXT stub = decrypt failure (Baileys StubType.CIPHERTEXT = 2)
+            const stubType = Number(msg?.messageStubType);
+            if (stubType === 2 || stubType === 47) {
+                decryptFailedCount += 1;
+                logInbox('baileys_inbound_ignored', {
+                    reason: 'decrypt_failed',
+                    messageId: msg?.key?.id || null,
+                    remoteJid: msg?.key?.remoteJid || null,
+                    stubType,
+                });
+                continue;
+            }
+
             const mapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
             if (mapped.action === 'duplicate') {
                 logInbox('baileys_inbound_ignored', {
@@ -363,7 +547,11 @@ function createBaileysTransport({
             }
             if (mapped.action !== 'capture') {
                 if (mapped.reason === 'unresolved_lid') {
-                    unresolvedLidCount += 1;
+                    enqueueUnresolvedLid(msg, upsert);
+                    continue;
+                }
+                if (mapped.reason === 'empty_content') {
+                    emptyContentCount += 1;
                 }
                 logInbox('baileys_inbound_ignored', {
                     reason: mapped.reason,
@@ -374,66 +562,12 @@ function createBaileysTransport({
                 continue;
             }
 
-            const captureCompletedAt = utcNow();
-            const msgTsMs = Number(msg.messageTimestamp)
-                ? Number(msg.messageTimestamp) * 1000
-                : Date.parse(waDetectedAt);
-            const timing = {
-                waDetectedAt,
-                captureStartedAt,
-                captureCompletedAt,
-                captureLatencyMs: isoBetween(captureStartedAt, captureCompletedAt),
-                endToEndLatencyMs: Math.max(0, Date.parse(captureCompletedAt) - msgTsMs),
-                browserQueueWaitMs: 0,
-                browserOperationMs: 0,
-            };
-
-            if (spool.hasProviderMessageId(mapped.providerMessageId)) {
-                logInbox('baileys_inbound_ignored', {
-                    reason: 'spool_duplicate',
-                    providerMessageId: mapped.providerMessageId,
-                    messageId: msg?.key?.id || null,
-                });
-                continue;
+            // Mapping arrived; drop any pending twin for same id.
+            if (msg?.key?.id && lidPending.has(msg.key.id)) {
+                lidPending.take(msg.key.id);
             }
 
-            spool.capture(mapped.normalized, { timing });
-            lastEventAt = captureCompletedAt;
-            lastCapturedCount += 1;
-            lastError = null;
-
-            logInbox('baileys_captured', {
-                providerMessageId: mapped.providerMessageId,
-                phone: mapped.phone,
-                captureLatencyMs: timing.captureLatencyMs,
-            });
-
-            if (typeof onLiveInbound === 'function') {
-                try {
-                    onLiveInbound({
-                        providerMessageId: mapped.providerMessageId,
-                        externalContactKey: mapped.phone || mapped.normalized?.phone || null,
-                        fromMe: false,
-                        isGroup: Boolean(mapped.normalized?.isGroup),
-                        messageTimestamp: mapped.normalized?.messageTimestamp
-                            || msg.messageTimestamp
-                            || null,
-                        receivedAt: captureCompletedAt,
-                        upsertType: upsert?.type || 'notify',
-                        content: mapped.normalized?.text
-                            || mapped.normalized?.content
-                            || mapped.normalized
-                            || null,
-                        normalized: mapped.normalized,
-                    });
-                } catch (hookErr) {
-                    logger.error('[baileys] onLiveInbound_failed', {
-                        error: hookErr && hookErr.message ? hookErr.message : String(hookErr),
-                    });
-                }
-            }
-
-            await worker.tick();
+            await captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt);
         }
     }
 
@@ -616,6 +750,7 @@ function createBaileysTransport({
         listening = false;
         ready = false;
         worker.stop();
+        lidPending.clear();
         clearReconnectTimer();
         await teardownSocket();
         return getStatus();

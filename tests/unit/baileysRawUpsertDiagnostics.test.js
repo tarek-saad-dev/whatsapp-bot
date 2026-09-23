@@ -67,8 +67,10 @@ class FakeSocket {
 async function createTestTransport(overrides = {}) {
     const socket = new FakeSocket();
     const spoolFile = path.join(os.tmpdir(), `baileys-raw-${Date.now()}-${Math.random()}.json`);
+    const lidMapFile = path.join(os.tmpdir(), `baileys-lid-${Date.now()}-${Math.random()}.json`);
     const transport = createBaileysTransport({
         authDir: path.join(os.tmpdir(), `baileys-auth-raw-${Date.now()}`),
+        lidMapFile,
         spool: createInboxSpool({ spoolFile }),
         logger: { info() {}, warn() {}, error() {} },
         makeSocket: (cfg) => {
@@ -85,7 +87,7 @@ async function createTestTransport(overrides = {}) {
     });
     await transport.start();
     await new Promise((r) => setImmediate(r));
-    return { transport, socket, spoolFile };
+    return { transport, socket, spoolFile, lidMapFile };
 }
 
 describe('baileys raw upsert diagnostics', () => {
@@ -168,23 +170,126 @@ describe('baileys raw upsert diagnostics', () => {
         await transport.stop();
     });
 
-    it('unresolved LID → baileys_inbound_ignored', async () => {
+    it('unresolved LID → pending then quarantine on timeout (not silent drop)', async () => {
+        const prev = process.env.BAILEYS_LID_PENDING_MS;
+        process.env.BAILEYS_LID_PENDING_MS = '40';
+        try {
+            const { transport, socket } = await createTestTransport();
+            logCapture.lines.length = 0;
+
+            socket.ev.emit('messages.upsert', {
+                type: 'notify',
+                messages: [makeInboundMsg({
+                    id: 'LIDMISS1',
+                    remoteJid: '12345678901234@lid',
+                    text: 'no mapping',
+                })],
+            });
+            await new Promise((r) => setImmediate(r));
+
+            expect(logCapture.lines.some((l) => l.includes('baileys_inbound_lid_pending'))).toBe(true);
+            expect(transport.spool.listRecent(10)).toHaveLength(0);
+            expect(transport.getInboxStatus().inboundCapture.pendingLid).toBe(1);
+
+            await new Promise((r) => setTimeout(r, 80));
+            expect(logCapture.lines.some((l) =>
+                l.includes('baileys_inbound_quarantined')
+                && l.includes('reason=unresolved_lid_timeout'),
+            )).toBe(true);
+            expect(transport.getInboxStatus().inboundCapture.pendingLid).toBe(0);
+            expect(transport.getInboxStatus().inboundCapture.quarantined).toBeGreaterThanOrEqual(1);
+            await transport.stop();
+        } finally {
+            if (prev === undefined) delete process.env.BAILEYS_LID_PENDING_MS;
+            else process.env.BAILEYS_LID_PENDING_MS = prev;
+        }
+    });
+
+    it('unresolved LID then mapping arrives → capture (no quarantine)', async () => {
+        const prev = process.env.BAILEYS_LID_PENDING_MS;
+        process.env.BAILEYS_LID_PENDING_MS = '500';
+        try {
+            const { transport, socket } = await createTestTransport();
+            logCapture.lines.length = 0;
+
+            socket.ev.emit('messages.upsert', {
+                type: 'notify',
+                messages: [makeInboundMsg({
+                    id: 'LIDWAIT1',
+                    remoteJid: '213262457151524@lid',
+                    text: 'will resolve',
+                })],
+            });
+            await new Promise((r) => setImmediate(r));
+            expect(transport.getInboxStatus().inboundCapture.pendingLid).toBe(1);
+
+            transport.lidCache.rememberPn(
+                '213262457151524@lid',
+                '201555123456@s.whatsapp.net',
+                'test.mapping',
+            );
+            await new Promise((r) => setTimeout(r, 20));
+
+            expect(logCapture.lines.some((l) => l.includes('baileys_inbound_lid_resolved'))).toBe(true);
+            expect(logCapture.lines.some((l) => l.includes('baileys_captured'))).toBe(true);
+            expect(transport.spool.listRecent(10)).toHaveLength(1);
+            expect(transport.getInboxStatus().inboundCapture.pendingLid).toBe(0);
+            await transport.stop();
+        } finally {
+            if (prev === undefined) delete process.env.BAILEYS_LID_PENDING_MS;
+            else process.env.BAILEYS_LID_PENDING_MS = prev;
+        }
+    });
+
+    it('@lid + senderPn → capture and learn mapping', async () => {
+        const { transport, socket } = await createTestTransport();
+        logCapture.lines.length = 0;
+        const msg = makeInboundMsg({
+            id: 'LIDPN1',
+            remoteJid: '92449473073158@lid',
+            text: 'with sender pn',
+        });
+        msg.key.senderPn = '201557994946@s.whatsapp.net';
+
+        socket.ev.emit('messages.upsert', { type: 'notify', messages: [msg] });
+        await new Promise((r) => setImmediate(r));
+
+        expect(logCapture.lines.some((l) => l.includes('baileys_captured'))).toBe(true);
+        expect(transport.lidCache.resolvePn('92449473073158@lid')).toContain('201557994946');
+        expect(transport.spool.listRecent(10)).toHaveLength(1);
+        await transport.stop();
+    });
+
+    it('fromMe remains ignored as inbound', async () => {
+        const { transport, socket } = await createTestTransport();
+        logCapture.lines.length = 0;
+        socket.ev.emit('messages.upsert', {
+            type: 'notify',
+            messages: [makeInboundMsg({ id: 'FROMME1', fromMe: true, text: 'out' })],
+        });
+        await new Promise((r) => setImmediate(r));
+        expect(logCapture.lines.some((l) => l.includes('baileys_captured'))).toBe(false);
+        expect(transport.spool.listRecent(10)).toHaveLength(0);
+        await transport.stop();
+    });
+
+    it('CIPHERTEXT stub → decrypt_failed counter (not silent)', async () => {
         const { transport, socket } = await createTestTransport();
         logCapture.lines.length = 0;
 
+        const msg = makeInboundMsg({ id: 'DEC1', text: 'opaque' });
+        msg.messageStubType = 2; // StubType.CIPHERTEXT
         socket.ev.emit('messages.upsert', {
             type: 'notify',
-            messages: [makeInboundMsg({
-                id: 'LIDMISS1',
-                remoteJid: '12345678901234@lid',
-                text: 'no mapping',
-            })],
+            messages: [msg],
         });
         await new Promise((r) => setImmediate(r));
 
         expect(logCapture.lines.some((l) =>
-            l.includes('baileys_inbound_ignored') && l.includes('reason=unresolved_lid'),
+            l.includes('baileys_inbound_ignored') && l.includes('reason=decrypt_failed'),
         )).toBe(true);
+        expect(transport.getInboxStatus().inboundCapture.decryptFailed).toBeGreaterThanOrEqual(1);
+        expect(transport.spool.listRecent(10)).toHaveLength(0);
         await transport.stop();
     });
 
@@ -243,6 +348,8 @@ describe('baileys raw upsert diagnostics', () => {
         const terminal = logCapture.lines.filter((l) =>
             l.includes('baileys_captured')
             || l.includes('baileys_inbound_ignored')
+            || l.includes('baileys_inbound_lid_pending')
+            || l.includes('baileys_inbound_quarantined')
             || l.includes('baileys_upsert_ignored')
             || l.includes('baileys_outbound_observed')
             || l.includes('baileys_outbound_ignored')
@@ -250,6 +357,7 @@ describe('baileys raw upsert diagnostics', () => {
         );
         expect(terminal.length).toBeGreaterThanOrEqual(3);
         expect(terminal.some((l) => l.includes('MIX3') || l.includes('outbound'))).toBe(true);
+        expect(terminal.some((l) => l.includes('lid_pending') || l.includes('LID') || l.includes('99999999999999'))).toBe(true);
         await transport.stop();
     });
 

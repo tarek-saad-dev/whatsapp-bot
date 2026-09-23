@@ -271,6 +271,24 @@ function createBaileysProvider({
         lastDeliveryAt: delivery.lastDeliveryAt || null,
         lastErrorCode: delivery.lastErrorCode || null,
       },
+      inboundCapture: (() => {
+        const inbox = transportStatus.inbox || null;
+        const capture = inbox && inbox.inboundCapture ? inbox.inboundCapture : null;
+        return {
+          rawUpsert: capture?.rawUpsert ?? 0,
+          captured: capture?.captured ?? inbox?.lastCapturedCount ?? 0,
+          unresolvedLid: capture?.unresolvedLid
+            ?? transportStatus.unresolvedLidCount
+            ?? 0,
+          decryptFailed: capture?.decryptFailed ?? 0,
+          emptyContent: capture?.emptyContent ?? 0,
+          quarantined: capture?.quarantined ?? 0,
+          pendingLid: capture?.pendingLid ?? 0,
+          listening: Boolean(inbox?.listening),
+          lastEventAt: inbox?.lastPollAt || null,
+        };
+      })(),
+      signalSessionChurn: transportStatus.diagnostics?.signalSessionChurn || null,
       outboundObservation: {
         running: Boolean(outboundObs.running),
         deliveryEnabled: Boolean(outboundObs.deliveryEnabled),
