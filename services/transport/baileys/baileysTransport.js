@@ -406,7 +406,11 @@ function createBaileysTransport({
         return { resolved: false, pnJid: null, source: null, tried };
     }
 
-    async function captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt) {
+    async function captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt, {
+        logicalUpsertType = 'notify',
+        sourceUpsertType = null,
+        liveDecryptRetry = false,
+    } = {}) {
         const captureCompletedAt = utcNow();
         const msgTsMs = Number(msg.messageTimestamp)
             ? Number(msg.messageTimestamp) * 1000
@@ -430,6 +434,18 @@ function createBaileysTransport({
             return;
         }
 
+        // Ensure normalized carries SaaS-safe logical type.
+        if (mapped.normalized) {
+            mapped.normalized.upsertType = logicalUpsertType || 'notify';
+            mapped.normalized.rawPayload = {
+                ...(mapped.normalized.rawPayload || {}),
+                upsertType: logicalUpsertType || 'notify',
+                logicalUpsertType: logicalUpsertType || 'notify',
+                sourceUpsertType: sourceUpsertType || upsert?.type || 'notify',
+                liveDecryptRetry: Boolean(liveDecryptRetry),
+            };
+        }
+
         spool.capture(mapped.normalized, { timing });
         lastEventAt = captureCompletedAt;
         lastCapturedCount += 1;
@@ -447,6 +463,9 @@ function createBaileysTransport({
             providerMessageId: mapped.providerMessageId,
             phone: mapped.phone,
             captureLatencyMs: timing.captureLatencyMs,
+            sourceUpsertType: sourceUpsertType || upsert?.type || null,
+            logicalUpsertType: logicalUpsertType || 'notify',
+            liveDecryptRetry: Boolean(liveDecryptRetry),
         });
 
         if (typeof onLiveInbound === 'function') {
@@ -460,7 +479,8 @@ function createBaileysTransport({
                         || msg.messageTimestamp
                         || null,
                     receivedAt: captureCompletedAt,
-                    upsertType: upsert?.type || 'notify',
+                    // SaaS only accepts notify — correlated append retries are logical notify.
+                    upsertType: logicalUpsertType || 'notify',
                     content: mapped.normalized?.text
                         || mapped.normalized?.content
                         || mapped.normalized
@@ -668,18 +688,40 @@ function createBaileysTransport({
             return;
         }
 
-        const gate = shouldProcessUpsert(upsert);
-        if (!gate.accept) {
-            logUpsertIgnoredPerMessage(upsert, gate.reason);
-            return;
-        }
-
+        const upsertType = String(upsert?.type || '');
         const waDetectedAt = utcNow();
+
         for (const msg of upsert.messages || []) {
             const captureStartedAt = utcNow();
+            const mid = String(msg?.key?.id || '').trim();
 
-            // Human/manual (and automated) fromMe outbounds → Cashier observation webhook.
-            // Never crash Baileys if Cashier is down.
+            // Per-message gate:
+            // - notify → live path
+            // - append → ONLY if this exact id is decryptPending (correlated live retry)
+            // - else → ignore (blocks historical append backlog)
+            let liveDecryptRetry = false;
+            if (upsertType === 'notify') {
+                // proceed
+            } else if (upsertType === 'append' && mid && decryptPending.has(mid)) {
+                liveDecryptRetry = true;
+                logInbox('baileys_inbound_decrypt_retry_correlated', {
+                    messageId: mid,
+                    sourceUpsertType: 'append',
+                    logicalUpsertType: 'notify',
+                });
+            } else {
+                logInbox('baileys_upsert_ignored', {
+                    reason: 'not_live_notify',
+                    upsertType: upsertType || null,
+                    messageId: mid || null,
+                    remoteJid: msg?.key?.remoteJid || null,
+                    fromMe: Boolean(msg?.key?.fromMe),
+                    decryptPending: mid ? decryptPending.has(mid) : false,
+                });
+                continue;
+            }
+
+            // Human/manual (and automated) fromMe outbounds → observation webhook.
             if (msg?.key?.fromMe) {
                 try {
                     const observed = mapBaileysOutboundObserved(msg, {
@@ -720,32 +762,49 @@ function createBaileysTransport({
                 continue;
             }
 
-            // CIPHERTEXT stub = decrypt not yet available. Wait for Baileys retry upsert
-            // (often type=append) instead of permanently dropping.
+            // CIPHERTEXT stub = decrypt not yet available. Wait for correlated append retry.
             const stubType = Number(msg?.messageStubType);
             if (stubType === 2 || stubType === 47) {
+                // Append that is STILL ciphertext: keep pending, do not capture.
+                if (liveDecryptRetry) {
+                    logInbox('baileys_inbound_decrypt_retry_still_ciphertext', {
+                        messageId: mid || null,
+                        stubType,
+                    });
+                    continue;
+                }
                 enqueueDecryptPending(msg, upsert);
                 continue;
             }
 
-            // Successful content for a decrypt-pending id → clear pending and continue.
-            const mid = String(msg?.key?.id || '').trim();
-            if (mid && decryptPending.has(mid)) {
+            // Correlated decrypt retry with real content → take pending before map/capture.
+            if (liveDecryptRetry && mid && decryptPending.has(mid)) {
                 decryptPending.take(mid);
                 logInbox('baileys_inbound_decrypt_resolved', {
                     messageId: mid,
-                    upsertType: upsert?.type || null,
+                    sourceUpsertType: 'append',
+                    logicalUpsertType: 'notify',
+                });
+            } else if (mid && decryptPending.has(mid) && upsertType === 'notify') {
+                // Rare: retry may arrive as notify — still clear pending.
+                decryptPending.take(mid);
+                logInbox('baileys_inbound_decrypt_resolved', {
+                    messageId: mid,
+                    sourceUpsertType: 'notify',
+                    logicalUpsertType: 'notify',
                 });
             }
 
-            const lidOutcome = (() => {
-                // Pre-resolve LID before mapping so mapBaileysInbound sees PN.
-                const native = tryResolveLidNative(msg);
-                return native;
-            })();
-            void lidOutcome;
+            tryResolveLidNative(msg);
 
-            const mapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
+            const mapOpts = {
+                includeGroups,
+                seenKeys,
+                lidCache,
+                sourceUpsertType: upsertType || 'notify',
+                logicalUpsertType: 'notify',
+            };
+            const mapped = mapBaileysInbound(msg, mapOpts);
             if (mapped.action === 'duplicate') {
                 logInbox('baileys_inbound_ignored', {
                     reason: 'duplicate',
@@ -759,9 +818,20 @@ function createBaileysTransport({
                 if (mapped.reason === 'unresolved_lid') {
                     const outcome = enqueueUnresolvedLid(msg, upsert);
                     if (outcome === 'retry_map') {
-                        const remapped = mapBaileysInbound(msg, { includeGroups, seenKeys, lidCache });
+                        const remapped = mapBaileysInbound(msg, mapOpts);
                         if (remapped.action === 'capture') {
-                            await captureMappedInbound(msg, remapped, upsert, waDetectedAt, captureStartedAt);
+                            await captureMappedInbound(
+                                msg,
+                                remapped,
+                                upsert,
+                                waDetectedAt,
+                                captureStartedAt,
+                                {
+                                    logicalUpsertType: 'notify',
+                                    sourceUpsertType: upsertType,
+                                    liveDecryptRetry,
+                                },
+                            );
                         }
                     }
                     continue;
@@ -774,17 +844,27 @@ function createBaileysTransport({
                     remoteJid: mapped.remoteJid,
                     customerJid: mapped.customerJid,
                     messageId: msg?.key?.id || null,
-                    upsertType: upsert?.type || null,
+                    upsertType: upsertType || null,
                 });
                 continue;
             }
 
-            // Mapping arrived; drop any pending twin for same id.
             if (mid && lidPending.has(mid)) {
                 lidPending.take(mid);
             }
 
-            await captureMappedInbound(msg, mapped, upsert, waDetectedAt, captureStartedAt);
+            await captureMappedInbound(
+                msg,
+                mapped,
+                upsert,
+                waDetectedAt,
+                captureStartedAt,
+                {
+                    logicalUpsertType: 'notify',
+                    sourceUpsertType: upsertType,
+                    liveDecryptRetry,
+                },
+            );
         }
     }
 

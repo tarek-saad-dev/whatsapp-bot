@@ -3,7 +3,7 @@
 const { normalizeMessageContent, getContentType } = require('@whiskeysockets/baileys');
 const { isLidUser } = require('@whiskeysockets/baileys/lib/WABinary/jid-utils');
 
-const LIVE_UPSERT_TYPES = new Set(['notify', 'append']);
+const LIVE_UPSERT_TYPE = 'notify';
 
 const BLOCKED_JID_SUFFIXES = [
     '@broadcast',
@@ -12,9 +12,9 @@ const BLOCKED_JID_SUFFIXES = [
 ];
 
 function isLiveUpsertType(type) {
-    // notify = live push; append = offline / decrypt-retry / placeholder resend
-    // (Baileys 6.7.x upsertMessage(..., offline ? 'append' : 'notify')).
-    return LIVE_UPSERT_TYPES.has(String(type || ''));
+    // Only notify is unconditionally live.
+    // Correlated decrypt-retry appends are handled at transport message-level.
+    return String(type || '') === LIVE_UPSERT_TYPE;
 }
 
 function isBlockedRemoteJid(remoteJid) {
@@ -229,6 +229,13 @@ function mapBaileysInbound(msg, {
     seenKeys = null,
     lidCache = null,
     chatTitle = null,
+    /** Physical Baileys upsert type (notify|append|…). Diagnostic only. */
+    sourceUpsertType = 'notify',
+    /**
+     * Logical type for downstream SaaS ingest.
+     * Live decrypt-retry appends MUST be normalized to notify.
+     */
+    logicalUpsertType = 'notify',
     normalize = require('../../inbox/normalizeMessage').normalizeMessage,
 } = {}) {
     const key = msg.key || {};
@@ -298,12 +305,15 @@ function mapBaileysInbound(msg, {
     }
 
     normalized.receivedAt = receivedIso;
+    normalized.upsertType = logicalUpsertType || 'notify';
     normalized.rawPayload = {
         ...normalized.rawPayload,
         baileysKey: key,
         transport: 'baileys',
         messageTimestamp: receivedIso,
-        upsertType: 'notify',
+        upsertType: logicalUpsertType || 'notify',
+        sourceUpsertType: sourceUpsertType || 'notify',
+        logicalUpsertType: logicalUpsertType || 'notify',
         sourceRemoteJid: remoteJid,
         resolvedCustomerJid: customerJid,
     };
@@ -418,8 +428,7 @@ function mapBaileysOutboundObserved(msg, {
 }
 
 module.exports = {
-    LIVE_UPSERT_TYPE: 'notify',
-    LIVE_UPSERT_TYPES,
+    LIVE_UPSERT_TYPE,
     isLiveUpsertType,
     isBlockedRemoteJid,
     isGroupJid,

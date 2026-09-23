@@ -302,7 +302,8 @@ describe('DRVOWA Phase 2A account manager', () => {
   });
 
   it('ignores append/history upserts as live inbound', () => {
-    expect(shouldProcessUpsert({ type: 'append', messages: [{}] }).accept).toBe(true);
+    expect(shouldProcessUpsert({ type: 'append', messages: [{}] }).accept).toBe(false);
+    expect(shouldProcessUpsert({ type: 'append', messages: [{}] }).reason).toBe('not_live_notify');
     expect(shouldProcessUpsert({ type: 'notify', messages: [{}] }).accept).toBe(true);
   });
 

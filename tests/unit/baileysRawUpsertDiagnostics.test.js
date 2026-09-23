@@ -150,32 +150,36 @@ describe('baileys raw upsert diagnostics', () => {
         await transport.stop();
     });
 
-    it('append upsert with content → capture (decrypt-retry / offline path)', async () => {
+    it('append upsert without decryptPending → ignored as not_live_notify', async () => {
         const { transport, socket } = await createTestTransport();
         logCapture.lines.length = 0;
 
         socket.ev.emit('messages.upsert', {
             type: 'append',
             messages: [
-                makeInboundMsg({ id: 'APP1', text: 'retry content one' }),
-                makeInboundMsg({ id: 'APP2', text: 'retry content two' }),
+                makeInboundMsg({ id: 'APP1', text: 'history one' }),
+                makeInboundMsg({ id: 'APP2', text: 'history two' }),
             ],
         });
         await new Promise((r) => setImmediate(r));
 
-        expect(logCapture.lines.filter((l) => l.includes('baileys_captured'))).toHaveLength(2);
-        expect(transport.spool.listRecent(10)).toHaveLength(2);
+        const ignored = logCapture.lines.filter((l) => l.includes('baileys_upsert_ignored'));
+        expect(ignored).toHaveLength(2);
+        expect(ignored.every((l) => l.includes('reason=not_live_notify'))).toBe(true);
+        expect(transport.spool.listRecent(10)).toHaveLength(0);
         await transport.stop();
     });
 
-    it('CIPHERTEXT notify then append content → capture (not permanent decrypt drop)', async () => {
+    it('CIPHERTEXT notify then correlated append → capture with logical notify', async () => {
         const prev = process.env.BAILEYS_DECRYPT_PENDING_MS;
-        process.env.BAILEYS_DECRYPT_PENDING_MS = '2000';
+        process.env.BAILEYS_DECRYPT_PENDING_MS = '5000';
         try {
             const { transport, socket } = await createTestTransport();
             logCapture.lines.length = 0;
+            const dtoUpsertTypes = [];
+            transport._testOnLive = null;
 
-            const cipher = makeInboundMsg({ id: 'DECAPP1', text: 'opaque' });
+            const cipher = makeInboundMsg({ id: 'M1', text: 'opaque' });
             cipher.messageStubType = 2;
             socket.ev.emit('messages.upsert', {
                 type: 'notify',
@@ -183,17 +187,69 @@ describe('baileys raw upsert diagnostics', () => {
             });
             await new Promise((r) => setImmediate(r));
             expect(logCapture.lines.some((l) => l.includes('baileys_inbound_decrypt_pending'))).toBe(true);
+            expect(transport.getInboxStatus().inboundCapture.pendingDecrypt).toBe(1);
             expect(transport.spool.listRecent(10)).toHaveLength(0);
 
             socket.ev.emit('messages.upsert', {
                 type: 'append',
-                messages: [makeInboundMsg({ id: 'DECAPP1', text: 'decrypted body' })],
+                messages: [makeInboundMsg({ id: 'M1', text: 'decrypted body' })],
             });
             await new Promise((r) => setImmediate(r));
 
-            expect(logCapture.lines.some((l) => l.includes('baileys_inbound_decrypt_resolved'))).toBe(true);
+            expect(logCapture.lines.some((l) => l.includes('baileys_inbound_decrypt_retry_correlated'))).toBe(true);
             expect(logCapture.lines.some((l) => l.includes('baileys_captured'))).toBe(true);
             expect(transport.spool.listRecent(10)).toHaveLength(1);
+            expect(transport.getInboxStatus().inboundCapture.pendingDecrypt).toBe(0);
+
+            const recent = transport.spool.listRecent(1)[0];
+            const pmid = recent.providerMessageId || recent.id;
+            const stored = transport.spool.getRecord(pmid);
+            expect(stored?.normalizedEvent?.upsertType).toBe('notify');
+            expect(stored?.normalizedEvent?.rawPayload?.sourceUpsertType).toBe('append');
+            expect(stored?.normalizedEvent?.rawPayload?.logicalUpsertType).toBe('notify');
+
+            // duplicate append must not double-capture
+            socket.ev.emit('messages.upsert', {
+                type: 'append',
+                messages: [makeInboundMsg({ id: 'M1', text: 'decrypted body again' })],
+            });
+            await new Promise((r) => setImmediate(r));
+            expect(transport.spool.listRecent(10)).toHaveLength(1);
+            await transport.stop();
+        } finally {
+            if (prev === undefined) delete process.env.BAILEYS_DECRYPT_PENDING_MS;
+            else process.env.BAILEYS_DECRYPT_PENDING_MS = prev;
+        }
+    });
+
+    it('unrelated append M2 ignored while M1 pending', async () => {
+        const prev = process.env.BAILEYS_DECRYPT_PENDING_MS;
+        process.env.BAILEYS_DECRYPT_PENDING_MS = '5000';
+        try {
+            const { transport, socket } = await createTestTransport();
+            logCapture.lines.length = 0;
+
+            const cipher = makeInboundMsg({ id: 'M1', text: 'opaque' });
+            cipher.messageStubType = 2;
+            socket.ev.emit('messages.upsert', {
+                type: 'notify',
+                messages: [cipher],
+            });
+            await new Promise((r) => setImmediate(r));
+
+            socket.ev.emit('messages.upsert', {
+                type: 'append',
+                messages: [makeInboundMsg({ id: 'M2', text: 'unrelated history' })],
+            });
+            await new Promise((r) => setImmediate(r));
+
+            expect(logCapture.lines.some((l) =>
+                l.includes('baileys_upsert_ignored')
+                && l.includes('reason=not_live_notify')
+                && l.includes('messageId=M2'),
+            )).toBe(true);
+            expect(transport.spool.listRecent(10)).toHaveLength(0);
+            expect(transport.getInboxStatus().inboundCapture.pendingDecrypt).toBe(1);
             await transport.stop();
         } finally {
             if (prev === undefined) delete process.env.BAILEYS_DECRYPT_PENDING_MS;
