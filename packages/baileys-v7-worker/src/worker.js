@@ -284,12 +284,29 @@ async function handleSend({ phone, message, idempotencyKey }) {
   return enqueueSend(async () => {
     const jid = `${digits}@s.whatsapp.net`;
     const result = await sock.sendMessage(jid, { text });
-    const providerMessageId = result?.key?.id || null;
+    const providerMessageId = result?.key?.id
+      || result?.message?.key?.id
+      || (typeof result === 'object' && result !== null && result.key && result.key.id)
+      || null;
+    // Baileys may return WAMessage or nested shapes; never leave success without an id when key exists.
+    if (!providerMessageId && result && typeof result === 'object') {
+      const nested = result.key || result.message?.key;
+      if (nested && nested.id) {
+        return {
+          success: true,
+          status: 'sent',
+          providerMessageId: String(nested.id),
+          idempotencyKey: idempotencyKey || null,
+        };
+      }
+    }
     return {
-      success: true,
-      status: 'sent',
+      success: Boolean(providerMessageId),
+      status: providerMessageId ? 'sent' : 'unknown',
       providerMessageId,
       idempotencyKey: idempotencyKey || null,
+      code: providerMessageId ? undefined : 'OUTBOUND_RESULT_UNKNOWN',
+      error: providerMessageId ? undefined : 'Outbound send completed without providerMessageId',
     };
   });
 }
