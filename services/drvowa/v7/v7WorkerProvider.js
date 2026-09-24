@@ -346,7 +346,14 @@ function createV7WorkerProvider({
           message: m,
           idempotencyKey,
         }, 60_000);
-        return reply.result;
+        const result = reply.result || {};
+        const messageId = result.messageId || result.providerMessageId || null;
+        return {
+          ...result,
+          messageId,
+          providerMessageId: result.providerMessageId || messageId,
+          success: result.success === true || Boolean(messageId),
+        };
       },
     });
   }

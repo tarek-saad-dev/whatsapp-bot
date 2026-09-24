@@ -284,29 +284,30 @@ async function handleSend({ phone, message, idempotencyKey }) {
   return enqueueSend(async () => {
     const jid = `${digits}@s.whatsapp.net`;
     const result = await sock.sendMessage(jid, { text });
-    const providerMessageId = result?.key?.id
-      || result?.message?.key?.id
-      || (typeof result === 'object' && result !== null && result.key && result.key.id)
-      || null;
-    // Baileys may return WAMessage or nested shapes; never leave success without an id when key exists.
-    if (!providerMessageId && result && typeof result === 'object') {
-      const nested = result.key || result.message?.key;
-      if (nested && nested.id) {
-        return {
-          success: true,
-          status: 'sent',
-          providerMessageId: String(nested.id),
-          idempotencyKey: idempotencyKey || null,
-        };
+    let providerMessageId = null;
+    if (result && typeof result === 'object') {
+      if (result.key && result.key.id) providerMessageId = String(result.key.id);
+      else if (Array.isArray(result) && result[0]?.key?.id) {
+        providerMessageId = String(result[0].key.id);
       }
     }
+    // eslint-disable-next-line no-console
+    console.log('[v7-worker-send]', JSON.stringify({
+      hasResult: Boolean(result),
+      resultType: result == null ? 'null' : typeof result,
+      keys: result && typeof result === 'object' ? Object.keys(result).slice(0, 8) : [],
+      hasKeyId: Boolean(providerMessageId),
+    }));
     return {
       success: Boolean(providerMessageId),
       status: providerMessageId ? 'sent' : 'unknown',
+      // managedOutboundSend reads messageId (v6 transport contract)
+      messageId: providerMessageId,
       providerMessageId,
       idempotencyKey: idempotencyKey || null,
       code: providerMessageId ? undefined : 'OUTBOUND_RESULT_UNKNOWN',
       error: providerMessageId ? undefined : 'Outbound send completed without providerMessageId',
+      httpStatus: providerMessageId ? 200 : 409,
     };
   });
 }
