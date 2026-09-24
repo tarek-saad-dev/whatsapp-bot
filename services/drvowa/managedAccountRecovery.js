@@ -42,10 +42,15 @@ async function recoverManagedAccounts({
 
   logger.info('[drvowa-recovery] started');
 
-  let runningKeys = [];
+  let runningEntries = [];
   try {
     registry.load();
-    runningKeys = registry.listRunningAccountKeys();
+    runningEntries = typeof registry.listRunningEntries === 'function'
+      ? registry.listRunningEntries()
+      : registry.listRunningAccountKeys().map((accountKey) => ({
+        accountKey,
+        runtimeEngine: 'BAILEYS_V6',
+      }));
   } catch (err) {
     logger.error('[drvowa-recovery] registry_load_failed', {
       code: err && err.code ? err.code : 'REGISTRY_LOAD_FAILED',
@@ -60,7 +65,7 @@ async function recoverManagedAccounts({
   }
 
   const summary = {
-    attempted: runningKeys.length,
+    attempted: runningEntries.length,
     ready: 0,
     failed: 0,
     loggedOut: 0,
@@ -70,19 +75,19 @@ async function recoverManagedAccounts({
   let index = 0;
 
   async function worker() {
-    while (index < runningKeys.length) {
+    while (index < runningEntries.length) {
       const current = index;
       index += 1;
-      const accountKey = runningKeys[current];
+      const { accountKey, runtimeEngine } = runningEntries[current];
       if (staggerMs > 0 && current > 0) {
         await sleep(staggerMs);
       }
       try {
-        const status = await manager.start(accountKey);
+        const status = await manager.start(accountKey, { runtimeEngine });
         if (status.state === CONNECTION_STATES.LOGGED_OUT) {
           summary.loggedOut += 1;
           try {
-            registry.setDesiredState(accountKey, registry.DESIRED_STOPPED);
+            registry.setDesiredState(accountKey, registry.DESIRED_STOPPED, { runtimeEngine });
           } catch (_) {
             // ignore registry write failure for logged-out mark
           }
@@ -91,7 +96,7 @@ async function recoverManagedAccounts({
         }
         if (status.state === CONNECTION_STATES.READY || status.ready) {
           summary.ready += 1;
-          logger.info('[drvowa-recovery] account_ready', { accountKey });
+          logger.info('[drvowa-recovery] account_ready', { accountKey, runtimeEngine });
           continue;
         }
         // QR_REQUIRED / CONNECTING / etc. — still recovered into manager
@@ -106,6 +111,7 @@ async function recoverManagedAccounts({
           logger.info('[drvowa-recovery] account_ready', {
             accountKey,
             state: status.state,
+            runtimeEngine,
           });
         }
       } catch (err) {
@@ -119,8 +125,8 @@ async function recoverManagedAccounts({
   }
 
   const workers = [];
-  const n = Math.min(concurrency, Math.max(runningKeys.length, 1));
-  for (let i = 0; i < n && runningKeys.length > 0; i += 1) {
+  const n = Math.min(concurrency, Math.max(runningEntries.length, 1));
+  for (let i = 0; i < n && runningEntries.length > 0; i += 1) {
     workers.push(worker());
   }
   await Promise.all(workers);

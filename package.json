@@ -13,6 +13,7 @@
     "test:whatsapp": "vitest run tests/whatsapp",
     "migrate:gateway-delivery": "node scripts/run-gateway-delivery-migration.js",
     "start": "node server.js",
+    "postinstall": "npm --prefix ./packages/baileys-v7-worker ci --omit=dev",
     "build:exe": "pkg launcher.js --targets node18-win-x64 --output whatsapp-bot-server.exe",
     "build:exe:all": "pkg launcher.js --targets node18-win-x64,node18-win-x86 --output whatsapp-bot-server.exe"
   },

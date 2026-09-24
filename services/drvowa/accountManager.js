@@ -4,6 +4,7 @@ const path = require('path');
 const { createSendQueue } = require('../sendQueue');
 const { validateAccountKey } = require('./accountKey');
 const { createBaileysProvider } = require('./baileysProvider');
+const { createV7WorkerProvider } = require('./v7/v7WorkerProvider');
 const { CONNECTION_STATES } = require('./connectionStates');
 const {
   createManagedAccountRegistry,
@@ -15,21 +16,30 @@ const {
   getManagedAuthBaseDir,
   getSendQueueMax,
 } = require('./s2sAuth');
+const {
+  RUNTIME_ENGINE_V6,
+  RUNTIME_ENGINE_V7,
+  normalizeRuntimeEngine,
+  getManagedAuthBaseDirV7,
+} = require('./runtimeEngine');
 
 /**
- * Multi-account WhatsApp runtime manager.
- * Legacy Cut Salon singleton remains separate and untouched.
+ * Multi-account WhatsApp runtime manager with selective engine dispatch.
+ * BAILEYS_V6 → in-process provider; BAILEYS_V7 → isolated worker process.
+ * Invariant: one accountKey → one engine owner (never v6+v7 simultaneously).
  */
 function createWhatsAppAccountManager({
   createProvider = createBaileysProvider,
+  createV7Provider = createV7WorkerProvider,
   createQueue = createSendQueue,
   enabled = isMultiAccountEnabled,
   authBaseDir = getManagedAuthBaseDir(),
+  authBaseDirV7 = getManagedAuthBaseDirV7(),
   sendQueueMax = getSendQueueMax(),
   registry = createManagedAccountRegistry(),
   logger = console,
 } = {}) {
-  /** @type {Map<string, { provider: any, queue: any }>} */
+  /** @type {Map<string, { provider: any, queue: any, runtimeEngine: string }>} */
   const accounts = new Map();
 
   function assertEnabled() {
@@ -52,9 +62,9 @@ function createWhatsAppAccountManager({
     return validated.accountKey;
   }
 
-  function persistDesired(accountKey, desiredState) {
+  function persistDesired(accountKey, desiredState, runtimeEngine) {
     try {
-      registry.setDesiredState(accountKey, desiredState);
+      registry.setDesiredState(accountKey, desiredState, { runtimeEngine });
     } catch (err) {
       logger.error('[drvowa-registry] persist_failed', {
         accountKey,
@@ -65,72 +75,116 @@ function createWhatsAppAccountManager({
   }
 
   function markLoggedOutStopped(accountKey) {
-    persistDesired(accountKey, DESIRED_STOPPED);
+    const engine = accounts.get(accountKey)?.runtimeEngine
+      || registry.getRuntimeEngine?.(accountKey)
+      || RUNTIME_ENGINE_V6;
+    persistDesired(accountKey, DESIRED_STOPPED, engine);
   }
 
-  function getOrCreate(accountKey) {
-    const key = requireValidKey(accountKey);
-    let entry = accounts.get(key);
-    if (entry) return entry;
+  function resolveEngine(accountKey, requested) {
+    const fromRequest = requested ? normalizeRuntimeEngine(requested) : null;
+    const fromRegistry = registry.getRuntimeEngine
+      ? registry.getRuntimeEngine(accountKey)
+      : RUNTIME_ENGINE_V6;
+    return fromRequest || fromRegistry || RUNTIME_ENGINE_V6;
+  }
 
-    const provider = createProvider({
-      accountKey: key,
-      authBaseDir,
-      logger,
-      printQrToTerminal: false,
-      onLoggedOut: () => {
-        markLoggedOutStopped(key);
-      },
-    });
+  function getOrCreate(accountKey, runtimeEngine) {
+    const key = requireValidKey(accountKey);
+    const engine = normalizeRuntimeEngine(runtimeEngine);
+    let entry = accounts.get(key);
+    if (entry) {
+      if (entry.runtimeEngine !== engine) {
+        const err = new Error(
+          `Account already owned by ${entry.runtimeEngine}; stop before switching to ${engine}`,
+        );
+        err.code = 'ENGINE_OWNERSHIP_CONFLICT';
+        err.status = 409;
+        throw err;
+      }
+      return entry;
+    }
+
+    const onLoggedOut = () => {
+      markLoggedOutStopped(key);
+    };
+
+    const provider = engine === RUNTIME_ENGINE_V7
+      ? createV7Provider({
+        accountKey: key,
+        authBaseDir: authBaseDirV7,
+        logger,
+        onLoggedOut,
+      })
+      : createProvider({
+        accountKey: key,
+        authBaseDir,
+        logger,
+        printQrToTerminal: false,
+        onLoggedOut,
+      });
+
     const queue = createQueue({ concurrency: 1, maxQueued: sendQueueMax });
-    entry = { provider, queue };
+    entry = { provider, queue, runtimeEngine: engine };
     accounts.set(key, entry);
     return entry;
   }
 
-  async function start(accountKey) {
+  async function start(accountKey, options = {}) {
     assertEnabled();
     const key = requireValidKey(accountKey);
-    persistDesired(key, DESIRED_RUNNING);
+    const engine = resolveEngine(key, options.runtimeEngine);
+    persistDesired(key, DESIRED_RUNNING, engine);
 
     const existing = accounts.get(key);
     if (existing) {
+      if (existing.runtimeEngine !== engine) {
+        const err = new Error(
+          `Account already owned by ${existing.runtimeEngine}; stop before switching to ${engine}`,
+        );
+        err.code = 'ENGINE_OWNERSHIP_CONFLICT';
+        err.status = 409;
+        throw err;
+      }
       const status = existing.provider.getStatus();
       if (status.state === CONNECTION_STATES.LOGGED_OUT) {
         markLoggedOutStopped(key);
-        return status;
+        return { ...status, runtimeEngine: engine };
       }
       if (status.state === CONNECTION_STATES.READY || status.ready) {
-        return status;
+        return { ...status, runtimeEngine: engine };
       }
       if (status.state !== CONNECTION_STATES.STOPPED
         && status.state !== CONNECTION_STATES.ERROR) {
-        return status;
+        return { ...status, runtimeEngine: engine };
       }
       const started = await existing.provider.start();
       if (started.state === CONNECTION_STATES.LOGGED_OUT) {
         markLoggedOutStopped(key);
       }
-      return started;
+      return { ...started, runtimeEngine: engine };
     }
 
-    const entry = getOrCreate(key);
+    const entry = getOrCreate(key, engine);
     const started = await entry.provider.start();
     if (started.state === CONNECTION_STATES.LOGGED_OUT) {
       markLoggedOutStopped(key);
     }
-    return started;
+    return { ...started, runtimeEngine: engine };
   }
 
   async function stop(accountKey) {
     assertEnabled();
     const key = requireValidKey(accountKey);
-    persistDesired(key, DESIRED_STOPPED);
+    const engine = accounts.get(key)?.runtimeEngine
+      || (registry.getRuntimeEngine ? registry.getRuntimeEngine(key) : RUNTIME_ENGINE_V6);
+    persistDesired(key, DESIRED_STOPPED, engine);
 
     const entry = accounts.get(key);
     if (!entry) {
       return {
         accountKey: key,
+        runtimeEngine: engine,
         state: CONNECTION_STATES.STOPPED,
         ready: false,
         qrAvailable: false,
@@ -143,16 +197,20 @@ function createWhatsAppAccountManager({
     }
     const status = await entry.provider.stop();
     accounts.delete(key);
-    return status;
+    return { ...status, runtimeEngine: entry.runtimeEngine };
   }
 
   function status(accountKey) {
     assertEnabled();
     const key = requireValidKey(accountKey);
     const entry = accounts.get(key);
+    const engine = entry?.runtimeEngine
+      || (registry.getRuntimeEngine ? registry.getRuntimeEngine(key) : RUNTIME_ENGINE_V6);
     if (!entry) {
+      const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
       return {
         accountKey: key,
+        runtimeEngine: engine,
         state: CONNECTION_STATES.STOPPED,
         ready: false,
         qrAvailable: false,
@@ -161,10 +219,10 @@ function createWhatsAppAccountManager({
         lastDisconnectCode: null,
         lastErrorCode: null,
         reconnectAttempts: 0,
-        authDir: path.join(authBaseDir, key),
+        authDir: path.join(base, key),
       };
     }
-    return entry.provider.getStatus();
+    return { ...entry.provider.getStatus(), runtimeEngine: entry.runtimeEngine };
   }
 
   function qr(accountKey) {
@@ -173,6 +231,10 @@ function createWhatsAppAccountManager({
     const entry = accounts.get(key);
     if (!entry) {
       return { accountKey: key, qr: null, qrAvailable: false };
+    }
+    if (typeof entry.provider.refreshQr === 'function') {
+      // sync path for API — use cached getQr; async refresh is best-effort
+      entry.provider.refreshQr().catch(() => {});
     }
     const value = entry.provider.getQr();
     return {
@@ -254,13 +316,16 @@ function createWhatsAppAccountManager({
 
   function getAuthDir(accountKey) {
     const key = requireValidKey(accountKey);
-    return path.join(authBaseDir, key);
+    const entry = accounts.get(key);
+    const engine = entry?.runtimeEngine
+      || (registry.getRuntimeEngine ? registry.getRuntimeEngine(key) : RUNTIME_ENGINE_V6);
+    const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
+    return path.join(base, key);
   }
 
   async function stopAll() {
     const keys = [...accounts.keys()];
     for (const key of keys) {
-      // stopAll during shutdown should not flip desiredState to STOPPED
       const entry = accounts.get(key);
       if (!entry) continue;
       try {
@@ -290,4 +355,6 @@ module.exports = {
   createWhatsAppAccountManager,
   DESIRED_RUNNING,
   DESIRED_STOPPED,
+  RUNTIME_ENGINE_V6,
+  RUNTIME_ENGINE_V7,
 };

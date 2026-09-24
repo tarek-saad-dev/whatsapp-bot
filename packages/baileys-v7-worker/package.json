@@ -1,0 +1,21 @@
+{
+  "name": "@drvowa/baileys-v7-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated Baileys v7 worker process for selective DRVOWA runtime engine BAILEYS_V7",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/worker.js",
+  "scripts": {
+    "start": "node src/worker.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "9.1.4",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "9.6.0",
+    "qrcode": "1.5.4"
+  }
+}

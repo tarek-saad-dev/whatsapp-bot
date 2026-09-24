@@ -117,7 +117,7 @@ function createManagedAccountRegistry({
     return null;
   }
 
-  function setDesiredState(accountKey, desiredState) {
+  function setDesiredState(accountKey, desiredState, options = {}) {
     const validated = validateAccountKey(accountKey);
     if (!validated.ok) {
       const err = new Error(validated.error);
@@ -128,25 +128,46 @@ function createManagedAccountRegistry({
       throw new Error('desiredState must be RUNNING or STOPPED');
     }
     const doc = normalizeDoc(cache || readSync());
+    const prev = doc.accounts[validated.accountKey] || {};
+    const runtimeEngine = options.runtimeEngine === 'BAILEYS_V7'
+      ? 'BAILEYS_V7'
+      : (prev.runtimeEngine === 'BAILEYS_V7' ? 'BAILEYS_V7' : 'BAILEYS_V6');
     doc.accounts[validated.accountKey] = {
       desiredState,
+      runtimeEngine,
       updatedAt: now(),
     };
     writeAtomic(doc);
     return doc.accounts[validated.accountKey];
   }
 
-  function listRunningAccountKeys() {
+  function getRuntimeEngine(accountKey) {
+    const validated = validateAccountKey(accountKey);
+    if (!validated.ok) return 'BAILEYS_V6';
     const doc = cache || readSync();
-    const keys = [];
+    const entry = doc.accounts[validated.accountKey];
+    if (entry && entry.runtimeEngine === 'BAILEYS_V7') return 'BAILEYS_V7';
+    return 'BAILEYS_V6';
+  }
+
+  function listRunningEntries() {
+    const doc = cache || readSync();
+    const out = [];
     for (const [key, entry] of Object.entries(doc.accounts || {})) {
       const validated = validateAccountKey(key);
       if (!validated.ok) continue;
       if (entry && entry.desiredState === DESIRED_RUNNING) {
-        keys.push(validated.accountKey);
+        out.push({
+          accountKey: validated.accountKey,
+          runtimeEngine: entry.runtimeEngine === 'BAILEYS_V7' ? 'BAILEYS_V7' : 'BAILEYS_V6',
+        });
       }
     }
-    return keys;
+    return out;
+  }
+
+  function listRunningAccountKeys() {
+    return listRunningEntries().map((e) => e.accountKey);
   }
 
   function getFilePath() {
@@ -157,7 +178,9 @@ function createManagedAccountRegistry({
     load,
     getDesiredState,
     setDesiredState,
+    getRuntimeEngine,
     listRunningAccountKeys,
+    listRunningEntries,
     getFilePath,
     DESIRED_RUNNING,
     DESIRED_STOPPED,
