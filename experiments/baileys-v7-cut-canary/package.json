@@ -1,0 +1,21 @@
+{
+  "name": "@drvowa/baileys-v7-cut-canary",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Baileys v7 canary for Cut Salon physical inbound decrypt experiment. NOT production.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "9.1.4",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "9.6.0",
+    "qrcode": "1.5.4"
+  }
+}

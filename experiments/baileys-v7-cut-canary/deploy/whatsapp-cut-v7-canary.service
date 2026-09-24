@@ -1,0 +1,22 @@
+[Unit]
+Description=DRVOWA Cut Salon Baileys v7 canary (experiment only)
+After=network.target
+# Intentionally independent from whatsapp-bot.service
+
+[Service]
+Type=simple
+User=whatsapp
+Group=whatsapp
+WorkingDirectory=/home/whatsapp/canary/baileys-v7-cut-canary
+Environment=NODE_ENV=production
+Environment=CANARY_AUTH_DIR=/home/whatsapp/canary-auth/cut-salon-v7
+Environment=CANARY_HTTP_PORT=3017
+Environment=CANARY_LOG_LEVEL=warn
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=5
+# No access needed to production auth dirs
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
