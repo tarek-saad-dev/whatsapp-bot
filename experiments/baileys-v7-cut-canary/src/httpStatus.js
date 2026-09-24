@@ -5,14 +5,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Minimal local status/QR HTTP server (loopback only).
- * No SaaS. No outbound WhatsApp.
+ * Minimal local status/QR/send HTTP server (loopback only).
  */
 export function createStatusServer({
   host = '127.0.0.1',
   port = 3017,
   getSnapshot,
   getQrPngPath,
+  onSend = null,
   logger = console,
 } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -39,6 +39,40 @@ export function createStatusServer({
       if (req.method === 'GET' && url.pathname === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/send') {
+        if (typeof onSend !== 'function') {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'outbound_unavailable' }));
+          return;
+        }
+        const chunks = [];
+        for await (const c of req) chunks.push(c);
+        const raw = Buffer.concat(chunks);
+        if (raw.length > 4096) {
+          res.writeHead(413, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'body_too_large' }));
+          return;
+        }
+        let body;
+        try {
+          body = JSON.parse(raw.toString('utf8') || '{}');
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'invalid_json' }));
+          return;
+        }
+        try {
+          const result = await onSend(body);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ success: true, ...result }));
+        } catch (err) {
+          const code = err?.code || 'SEND_FAILED';
+          const status = code === 'DESTINATION_NOT_ALLOWED' || code === 'OUTBOUND_DISABLED' ? 403 : 500;
+          res.writeHead(status, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: code }));
+        }
         return;
       }
       res.writeHead(404, { 'content-type': 'application/json' });

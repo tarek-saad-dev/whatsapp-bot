@@ -93,13 +93,42 @@ describe('auth isolation guard', () => {
   });
 });
 
-describe('no outbound API surface', () => {
-  it('package does not export send helpers', async () => {
-    const fs = await import('node:fs');
-    const text = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
-    assert.equal(text.includes('sendMessage'), false);
-    const index = fs.readFileSync(path.join(root, 'src/index.js'), 'utf8');
-    assert.equal(/sock\.sendMessage\(/.test(index), false);
-    assert.equal(/\.sendMessage\s*\(/.test(index), false);
+describe('dto builder', () => {
+  it('builds notify DTO with PN from remoteJidAlt', async () => {
+    const { buildCanaryInboundDto } = await import(pathToFileURL(path.join(root, 'src/dto.js')).href);
+    const built = await buildCanaryInboundDto({
+      key: {
+        id: 'MID1',
+        remoteJid: '123@lid',
+        remoteJidAlt: '201557994946@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: { conversation: 'v7 e2e inbox test 1' },
+      messageTimestamp: 1700000000,
+    }, { accountKey: 'wa_f09d54055f079b2624800b46', upsertType: 'notify' });
+    assert.equal(built.ok, true);
+    assert.equal(built.dto.upsertType, 'notify');
+    assert.equal(built.dto.provider, 'baileys');
+    assert.equal(built.dto.providerMessageId, 'false_201557994946@c.us_MID1');
+    assert.equal(built.dto.externalContactKey, '201557994946@s.whatsapp.net');
+    assert.equal(built.dto.content, 'v7 e2e inbox test 1');
+  });
+
+  it('rejects ciphertext / empty', async () => {
+    const { buildCanaryInboundDto } = await import(pathToFileURL(path.join(root, 'src/dto.js')).href);
+    const built = await buildCanaryInboundDto({
+      key: { id: 'X', remoteJid: '1@lid', fromMe: false },
+      messageStubType: 2,
+    }, { accountKey: 'wa_test' });
+    assert.equal(built.ok, false);
+  });
+});
+
+describe('outbound gate', () => {
+  it('blocks non-allowed destination', async () => {
+    const { createOutboundGate } = await import(pathToFileURL(path.join(root, 'src/outbound.js')).href);
+    const gate = createOutboundGate({ allowedPhoneDigits: '201557994946', enabled: true });
+    assert.throws(() => gate.assertAllowed('201000000000'), /destination_not_allowed/);
+    assert.equal(gate.assertAllowed('01557994946'), '201557994946');
   });
 });
