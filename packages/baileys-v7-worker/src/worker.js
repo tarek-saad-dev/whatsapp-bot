@@ -22,6 +22,7 @@ import { summarizeInbound, logInboundSafe } from './safeLog.js';
 import { buildV7InboundDto } from './dto.js';
 import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
+import { buildV7OutboundObservation } from './outboundObserve.js';
 
 const logger = pino({ level: process.env.V7_WORKER_LOG_LEVEL || 'warn' });
 
@@ -108,11 +109,52 @@ async function writeQr(qr) {
 
 function shouldIgnoreUpsert(msg) {
   const key = msg?.key || {};
-  if (key.fromMe) return 'fromMe';
+  // fromMe is NOT discarded here — handled as outbound observation.
   const remote = String(key.remoteJid || '');
   if (remote.endsWith('@g.us')) return 'group';
   if (remote === 'status@broadcast') return 'status';
   return null;
+}
+
+function ownAccountDigits() {
+  try {
+    const id = sock?.user?.id || sock?.authState?.creds?.me?.id || '';
+    const digits = String(id).split(':')[0].split('@')[0].replace(/\D/g, '');
+    return /^\d{8,15}$/.test(digits) ? digits : null;
+  } catch {
+    return null;
+  }
+}
+
+async function maybeObserveOutbound(msg) {
+  const resolveLidPn = async (lidJid) => {
+    try {
+      return await sock?.signalRepository?.lidMapping?.getPNForLID?.(lidJid);
+    } catch {
+      return null;
+    }
+  };
+
+  const built = await buildV7OutboundObservation(msg, {
+    resolveLidPn,
+    ownDigits: ownAccountDigits(),
+  });
+  if (!built.ok) {
+    // eslint-disable-next-line no-console
+    console.log('[v7-worker-outbound] skip', JSON.stringify({ reason: built.reason }));
+    return;
+  }
+  if (typeof process.send === 'function') {
+    process.send({
+      type: 'outboundObserved',
+      observation: built.observation,
+    });
+  }
+  // eslint-disable-next-line no-console
+  console.log('[v7-worker-outbound] observed', JSON.stringify({
+    providerMessageId: built.observation.providerMessageId,
+    textLength: built.observation.text ? String(built.observation.text).length : 0,
+  }));
 }
 
 function normalizePhoneDigits(phone) {
@@ -148,10 +190,20 @@ function onMessagesUpsert(upsert) {
   const type = upsert?.type || 'unknown';
   const messages = Array.isArray(upsert?.messages) ? upsert.messages : [];
   for (const msg of messages) {
-    const ignore = shouldIgnoreUpsert(msg);
+    const key = msg?.key || {};
     const summary = summarizeInbound(msg);
     summary.upsertType = type;
-    if (ignore === 'fromMe' || ignore === 'group' || ignore === 'status') {
+
+    // Outbound observation path (manual phone / API echo) — never inbound ingest.
+    if (key.fromMe) {
+      summary.decryptOutcome = 'outbound_observation_candidate';
+      logInboundSafe(summary, type);
+      maybeObserveOutbound(msg).catch(() => {});
+      continue;
+    }
+
+    const ignore = shouldIgnoreUpsert(msg);
+    if (ignore === 'group' || ignore === 'status') {
       logInboundSafe(summary, type);
       continue;
     }

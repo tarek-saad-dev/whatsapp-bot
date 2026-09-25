@@ -7,6 +7,11 @@ const { CONNECTION_STATES } = require('../connectionStates');
 const { createOutboundIdempotencyStore } = require('../outboundIdempotencyStore');
 const { sendManagedWithIdempotency } = require('../managedOutboundSend');
 const { createOutboundNumberSafety } = require('../outboundNumberSafety');
+const { createOutboundObservationSpool } = require('../outboundObservationSpool');
+const { createManagedOutboundObserver } = require('../managedOutboundObserver');
+const {
+  createDrvowaOutboundObservationWorker,
+} = require('../drvowaOutboundObservationWorker');
 const { getManagedAuthBaseDirV7 } = require('../runtimeEngine');
 
 const WORKER_ENTRY = path.resolve(
@@ -99,7 +104,23 @@ function createV7WorkerProvider({
 } = {}) {
   const authDir = path.join(authBaseDir, accountKey);
   const idempotencyFile = path.join(authDir, 'outbound-idempotency.json');
+  const outboundObsSpoolFile = path.join(authDir, 'outbound-observation-spool.json');
   const idempotencyStore = createOutboundIdempotencyStore({ filePath: idempotencyFile });
+  const outboundObservationSpool = createOutboundObservationSpool({
+    spoolFile: outboundObsSpoolFile,
+  });
+  const outboundObservationWorker = createDrvowaOutboundObservationWorker({
+    accountKey,
+    spool: outboundObservationSpool,
+    logger,
+  });
+  const outboundObservedPoster = createManagedOutboundObserver({
+    accountKey,
+    idempotencyStore,
+    observationSpool: outboundObservationSpool,
+    observationWorker: outboundObservationWorker,
+    logger,
+  });
   const numberSafety = createOutboundNumberSafety({ accountKey, logger });
 
   let child = null;
@@ -152,6 +173,23 @@ function createV7WorkerProvider({
     });
   }
 
+  function handleOutboundObserved(observation) {
+    if (!observation || typeof observation !== 'object') return;
+    const providerMessageId = String(observation.providerMessageId || '').trim();
+    if (!providerMessageId) return;
+    outboundObservedPoster.observe({
+      providerMessageId,
+      phone: observation.phone != null ? String(observation.phone) : null,
+      text: observation.text != null ? String(observation.text) : null,
+      occurredAt: observation.occurredAt || new Date().toISOString(),
+    }).catch((err) => {
+      logger.warn?.('[v7-outbound] observe_error', {
+        accountKey,
+        code: err && err.code ? err.code : 'OBSERVE_FAILED',
+      });
+    });
+  }
+
   function handleChildMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'status' && msg.status) {
@@ -163,6 +201,10 @@ function createV7WorkerProvider({
           /* ignore */
         }
       }
+      return;
+    }
+    if (msg.type === 'outboundObserved') {
+      handleOutboundObserved(msg.observation);
       return;
     }
     if (msg.type === 'reply') {
@@ -230,6 +272,7 @@ function createV7WorkerProvider({
     if (child && child.connected) {
       const reply = await sendIpc({ type: 'getStatus' });
       lastStatus = { ...lastStatus, ...reply.status, authDir };
+      outboundObservationWorker.start();
       return getStatus();
     }
     lastStatus = { ...lastStatus, state: CONNECTION_STATES.STARTING, ready: false };
@@ -246,10 +289,12 @@ function createV7WorkerProvider({
         lastErrorCode: err.code || 'START_FAILED',
       };
     }
+    outboundObservationWorker.start();
     return getStatus();
   }
 
   async function stop() {
+    outboundObservationWorker.stop();
     if (!child) {
       lastStatus = {
         ...lastStatus,
@@ -297,7 +342,22 @@ function createV7WorkerProvider({
   }
 
   function getStatus() {
-    return { ...lastStatus, authDir, runtimeEngine: 'BAILEYS_V7' };
+    const outboundObs = outboundObservationWorker.getStatus();
+    return {
+      ...lastStatus,
+      authDir,
+      runtimeEngine: 'BAILEYS_V7',
+      outboundObservation: {
+        running: Boolean(outboundObs.running),
+        deliveryEnabled: Boolean(outboundObs.deliveryEnabled),
+        pending: outboundObs.pending ?? 0,
+        unresolved: outboundObs.unresolved ?? 0,
+        failed: outboundObs.failed ?? 0,
+        delivered: outboundObs.delivered ?? 0,
+        lastDeliveryAt: outboundObs.lastDeliveryAt || null,
+        lastErrorCode: outboundObs.lastErrorCode || null,
+      },
+    };
   }
 
   function getQr() {
@@ -339,6 +399,8 @@ function createV7WorkerProvider({
       store: idempotencyStore,
       numberSafety,
       logger,
+      // Fail-safe: queue DRVOWA_API observation even if Baileys does not echo fromMe.
+      observeApiOutbound: (payload) => outboundObservedPoster.observe(payload),
       sendFn: async (p, m) => {
         const reply = await sendIpc({
           type: 'send',
@@ -368,6 +430,10 @@ function createV7WorkerProvider({
     getQr,
     refreshQr,
     send,
+    // test hooks
+    _outboundObservedPoster: outboundObservedPoster,
+    _outboundObservationSpool: outboundObservationSpool,
+    _handleOutboundObserved: handleOutboundObserved,
   };
 }
 
