@@ -81,6 +81,12 @@ function createBaileysTransport({
     let emptyContentCount = 0;
     let inboundQuarantinedCount = 0;
     let decryptFailedCount = 0;
+    let lastPlaintextInboundAt = null;
+    let lastDecryptFailureAt = null;
+    const distinctDecryptFailureIds = new Set();
+    let activeFailureStreak = 0;
+    let failureEpisodeStartedAt = null;
+    const activeFailureIds = new Set();
     let lastConnectedAt = null;
     let lastDisconnectAt = null;
     let stopping = false;
@@ -203,8 +209,36 @@ function createBaileysTransport({
                 pendingLid: lidPending.size(),
                 pendingDecrypt: decryptPending.size(),
                 durableQuarantine: inboundQuarantine.size(),
+                lastPlaintextInboundAt,
+                lastDecryptFailureAt,
+                distinctDecryptFailureMessageIds: distinctDecryptFailureIds.size,
+                activeFailureStreak,
+                activeFailureDistinctIds: activeFailureIds.size,
+                failureEpisodeStartedAt,
+                // Never infer messageAbsentFromNode on V6 without explicit evidence.
+                messageAbsentFromNodeCount: 0,
             },
         };
+    }
+
+    function clearActiveFailureEpisode() {
+        activeFailureStreak = 0;
+        failureEpisodeStartedAt = null;
+        activeFailureIds.clear();
+    }
+
+    function noteDecryptFailure(messageId) {
+        decryptFailedCount += 1;
+        lastDecryptFailureAt = new Date().toISOString();
+        if (!failureEpisodeStartedAt) {
+            failureEpisodeStartedAt = lastDecryptFailureAt;
+        }
+        activeFailureStreak += 1;
+        const id = messageId != null ? String(messageId).trim() : '';
+        if (id) {
+            distinctDecryptFailureIds.add(id);
+            activeFailureIds.add(id);
+        }
     }
 
     function getStatus() {
@@ -449,6 +483,9 @@ function createBaileysTransport({
         spool.capture(mapped.normalized, { timing });
         lastEventAt = captureCompletedAt;
         lastCapturedCount += 1;
+        lastPlaintextInboundAt = captureCompletedAt
+            || new Date().toISOString();
+        clearActiveFailureEpisode();
         lastError = null;
 
         // Clear any pending/quarantine twin for this id.
@@ -576,7 +613,7 @@ function createBaileysTransport({
         tryResolveLidNative(msg);
 
         if (!messageId) {
-            decryptFailedCount += 1;
+            noteDecryptFailure(null);
             quarantineInbound(msg, 'decrypt_failed_missing_id', { upsertType: upsert?.type });
             return;
         }
@@ -586,7 +623,7 @@ function createBaileysTransport({
             { msg, upsertType: upsert?.type || 'notify', reason: 'decrypt_pending' },
             {
                 onTimeout: (entry) => {
-                    decryptFailedCount += 1;
+                    noteDecryptFailure(messageId);
                     quarantineInbound(entry.msg, 'decrypt_timeout', {
                         pendingMs: decryptPending.timeoutMs,
                         upsertType: entry.upsertType,
@@ -601,7 +638,7 @@ function createBaileysTransport({
             },
         );
         if (!result.ok) {
-            decryptFailedCount += 1;
+            noteDecryptFailure(messageId);
             quarantineInbound(msg, result.reason || 'decrypt_pending_buffer_full', {
                 upsertType: upsert?.type,
             });

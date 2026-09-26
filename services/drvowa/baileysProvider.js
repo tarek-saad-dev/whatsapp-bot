@@ -29,6 +29,10 @@ const {
 const {
   createOutboundNumberSafety,
 } = require('./outboundNumberSafety');
+const {
+  normalizeV6InboundCapture,
+  buildCryptoHealthStatus,
+} = require('./compatibilityClassifier');
 
 function createNoopDeliveryWorker() {
   return {
@@ -288,7 +292,35 @@ function createBaileysProvider({
           durableQuarantine: capture?.durableQuarantine ?? 0,
           listening: Boolean(inbox?.listening),
           lastEventAt: inbox?.lastPollAt || null,
+          lastPlaintextInboundAt: capture?.lastPlaintextInboundAt || null,
+          lastDecryptFailureAt: capture?.lastDecryptFailureAt || null,
+          distinctDecryptFailureMessageIds:
+            capture?.distinctDecryptFailureMessageIds ?? 0,
+          messageAbsentFromNodeCount: capture?.messageAbsentFromNodeCount ?? 0,
+          activeFailureStreak: capture?.activeFailureStreak ?? 0,
+          activeFailureDistinctIds: capture?.activeFailureDistinctIds ?? 0,
+          failureEpisodeStartedAt: capture?.failureEpisodeStartedAt || null,
         };
+      })(),
+      cryptoHealth: (() => {
+        const inbox = transportStatus.inbox || null;
+        const capture = inbox && inbox.inboundCapture ? inbox.inboundCapture : null;
+        const normalized = normalizeV6InboundCapture({
+          captured: capture?.captured ?? inbox?.lastCapturedCount ?? 0,
+          decryptFailed: capture?.decryptFailed ?? 0,
+          lastEventAt: inbox?.lastPollAt || null,
+          lastPlaintextInboundAt: capture?.lastPlaintextInboundAt || null,
+          lastDecryptFailureAt: capture?.lastDecryptFailureAt || null,
+          distinctDecryptFailureMessageIds:
+            capture?.distinctDecryptFailureMessageIds ?? 0,
+          messageAbsentFromNodeCount: capture?.messageAbsentFromNodeCount ?? 0,
+          activeFailureStreak: capture?.activeFailureStreak ?? 0,
+          activeFailureDistinctIds: capture?.activeFailureDistinctIds ?? 0,
+          failureEpisodeStartedAt: capture?.failureEpisodeStartedAt || null,
+        });
+        return buildCryptoHealthStatus(normalized, {
+          socketReady: state === CONNECTION_STATES.READY,
+        });
       })(),
       signalSessionChurn: transportStatus.diagnostics?.signalSessionChurn || null,
       outboundObservation: {

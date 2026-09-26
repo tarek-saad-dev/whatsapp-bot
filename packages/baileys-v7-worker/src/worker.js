@@ -207,13 +207,20 @@ function onMessagesUpsert(upsert) {
       logInboundSafe(summary, type);
       continue;
     }
+    const failurePmid = summary.messageId || msg?.key?.id || null;
     if (summary.plaintextPresent === 'YES') {
       cryptoHealth.recordPlaintext();
       maybeDeliver(msg, type).catch(() => {});
     } else if (summary.decryptOutcome === 'ciphertext_or_stub' || summary.stubType === 2) {
-      cryptoHealth.recordDecryptFailure({ absentFromNode: summary.stubType === 2 });
+      cryptoHealth.recordDecryptFailure({
+        absentFromNode: summary.stubType === 2,
+        providerMessageId: failurePmid,
+      });
     } else if (summary.decryptOutcome === 'no_message_node' || summary.decryptOutcome === 'no_plaintext') {
-      cryptoHealth.recordDecryptFailure({ absentFromNode: summary.decryptOutcome === 'no_message_node' });
+      cryptoHealth.recordDecryptFailure({
+        absentFromNode: summary.decryptOutcome === 'no_message_node',
+        providerMessageId: failurePmid,
+      });
     }
     logInboundSafe(summary, type);
     emitStatus();

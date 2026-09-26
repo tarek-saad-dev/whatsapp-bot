@@ -22,6 +22,9 @@ const {
   normalizeRuntimeEngine,
   getManagedAuthBaseDirV7,
 } = require('./runtimeEngine');
+const {
+  attachCompatibilityDiagnostics,
+} = require('./compatibilityClassifier');
 
 /**
  * Multi-account WhatsApp runtime manager with selective engine dispatch.
@@ -208,7 +211,7 @@ function createWhatsAppAccountManager({
       || (registry.getRuntimeEngine ? registry.getRuntimeEngine(key) : RUNTIME_ENGINE_V6);
     if (!entry) {
       const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
-      return {
+      return attachCompatibilityDiagnostics({
         accountKey: key,
         runtimeEngine: engine,
         state: CONNECTION_STATES.STOPPED,
@@ -220,9 +223,12 @@ function createWhatsAppAccountManager({
         lastErrorCode: null,
         reconnectAttempts: 0,
         authDir: path.join(base, key),
-      };
+      });
     }
-    return { ...entry.provider.getStatus(), runtimeEngine: entry.runtimeEngine };
+    return attachCompatibilityDiagnostics({
+      ...entry.provider.getStatus(),
+      runtimeEngine: entry.runtimeEngine,
+    });
   }
 
   function qr(accountKey) {
