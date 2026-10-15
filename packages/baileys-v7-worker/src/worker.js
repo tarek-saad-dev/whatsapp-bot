@@ -227,12 +227,14 @@ async function flushInboundSpool() {
 
 async function reportInboundReceipts() {
   if (receiptBusy || stopping || !S2S_ENABLED || !process.env.DRVOWA_RUNTIME_TOKEN) return;
-  const rows = inboundSpool.listRecent(100).filter(row => row.providerMessageId && row.capturedAt);
+  const rows = inboundSpool.listRecent(500).filter(row => row.providerMessageId && row.capturedAt);
   if (!rows.length) return;
   receiptBusy = true;
   try {
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/\\/+$/, '');
-    const response = await fetch(base + '/api/runtime/whatsapp/receipts', {
+    for (let start = 0; start < rows.length; start += 100) {
+      const batch = rows.slice(start, start + 100);
+      const response = await fetch(base + '/api/runtime/whatsapp/receipts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -240,7 +242,7 @@ async function reportInboundReceipts() {
       },
       body: JSON.stringify({
         accountKey: ACCOUNT_KEY,
-        records: rows.map(row => ({
+        records: batch.map(row => ({
           providerMessageId: row.providerMessageId,
           capturedAt: row.capturedAt,
           status: row.deliveryStatus === 'delivered' ? 'DELIVERED'
@@ -249,7 +251,8 @@ async function reportInboundReceipts() {
       }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) console.warn('[v7-reliability] receipts_http', response.status);
+      if (!response.ok) { console.warn('[v7-reliability] receipts_http', response.status); break; }
+    }
   } catch (error) {
     console.warn('[v7-reliability] receipts_retry_next_tick', String(error?.name || 'NETWORK'));
   } finally { receiptBusy = false; }
@@ -279,7 +282,9 @@ function onMessagesUpsert(upsert) {
     const failurePmid = summary.messageId || msg?.key?.id || null;
     if (summary.plaintextPresent === 'YES') {
       cryptoHealth.recordPlaintext();
-      maybeDeliver(msg, type).catch(() => {});
+      maybeDeliver(msg, type).catch((error) => {
+        console.error('[v7-reliability] inbound_capture_failed', String(error?.code || error?.name || 'CAPTURE_ERROR'));
+      });
     } else if (summary.decryptOutcome === 'ciphertext_or_stub' || summary.stubType === 2) {
       cryptoHealth.recordDecryptFailure({
         absentFromNode: summary.stubType === 2,
@@ -513,7 +518,7 @@ async function main() {
   }));
 
   inboundTimer = setInterval(() => void flushInboundSpool(), 3000);
-  receiptTimer = setInterval(() => void reportInboundReceipts(), 60_000);
+  receiptTimer = setInterval(() => void reportInboundReceipts(), 30_000);
   void flushInboundSpool();
   void reportInboundReceipts();
   setState('STARTING');
