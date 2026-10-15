@@ -586,7 +586,7 @@ function enqueueSend(fn) {
   return run;
 }
 
-async function handleSend({ phone, message, idempotencyKey }) {
+async function handleSend({ phone, message, idempotencyKey, quotedMessage = null }) {
   if (snapshot.state !== 'READY' || !sock) {
     return {
       success: false,
@@ -617,9 +617,31 @@ async function handleSend({ phone, message, idempotencyKey }) {
     };
   }
 
+  if (quotedMessage) {
+    if (typeof quotedMessage !== 'object'
+      || typeof quotedMessage.providerMessageId !== 'string'
+      || quotedMessage.providerMessageId.length > 256
+      || quotedMessage.providerMessageId.length === 0
+      || !['INBOUND', 'OUTBOUND'].includes(quotedMessage.direction)
+      || typeof quotedMessage.text !== 'string'
+      || quotedMessage.text.length > 1000) {
+      return { success: false, status: 'failed', sendAttempted: false,
+        code: 'INVALID_QUOTE', httpStatus: 400 };
+    }
+  }
+
   return enqueueSend(async () => {
     const jid = `${digits}@s.whatsapp.net`;
-    const result = await sock.sendMessage(jid, { text });
+    const originalId = quotedMessage?.providerMessageId || '';
+    const rawId = originalId.startsWith('false_')
+      ? originalId.replace(/^false_\\d+@c\\.us_/, '') : originalId;
+    const quote = quotedMessage ? {
+      key: { remoteJid: jid, id: rawId,
+        fromMe: quotedMessage.direction === 'OUTBOUND' },
+      message: { conversation: quotedMessage.text || 'رسالة سابقة' },
+    } : undefined;
+    const result = await sock.sendMessage(jid, { text },
+      quote ? { quoted: quote } : undefined);
     let providerMessageId = null;
     if (result && typeof result === 'object') {
       if (result.key && result.key.id) providerMessageId = String(result.key.id);
