@@ -23,10 +23,10 @@ function normalizePhoneForHash(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
 
-function hashPayload({ phone, message }) {
+function hashPayload({ phone, message, quotedMessage = null }) {
   return crypto
     .createHash('sha256')
-    .update(`${normalizePhoneForHash(phone)}\0${String(message || '')}`, 'utf8')
+    .update(`${normalizePhoneForHash(phone)}\0${String(message || '')}${quotedMessage ? "\\0quote:" + quotedMessage.providerMessageId : ""}`, 'utf8')
     .digest('hex');
 }
 
