@@ -70,6 +70,12 @@ jobs:
             "root@${VPS_HOST}" \
             'echo "SSH_CONNECTION_OK"'
 
+      # Previous deployments failed with EACCES on node_modules/.bin.
+      # Repair the known runtime dependency directory, not application source.
+      - name: Restore WhatsApp dependency ownership
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new "root@${VPS_HOST}" 'if id whatsapp >/dev/null 2>&1 && test -d /home/whatsapp/whatsapp-bot/node_modules; then chown -R whatsapp:whatsapp /home/whatsapp/whatsapp-bot/node_modules; fi'
+
       - name: Deploy production
         run: |
           set -euo pipefail

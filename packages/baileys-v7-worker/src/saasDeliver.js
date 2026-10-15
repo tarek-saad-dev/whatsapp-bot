@@ -55,6 +55,7 @@ export function createSaasDeliverer({
           Authorization: `Bearer ${runtimeToken}`,
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
       });
       stats.lastStatus = res.status;
       stats.lastProviderMessageId = pmid;
