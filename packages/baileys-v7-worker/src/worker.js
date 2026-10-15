@@ -8,12 +8,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+import { normalizeMirrorChat, normalizeMirrorMessage } from './mirrorSync.js';
+import { createDurableMirrorSpool } from './durableMirrorSpool.js';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   Browsers,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -41,6 +45,17 @@ if (!ACCOUNT_KEY || !AUTH_DIR) {
 const require = createRequire(import.meta.url);
 const { createInboxSpool } = require('../../../services/inbox/inboxSpool.js');
 const inboundSpool = createInboxSpool({ spoolFile: path.join(AUTH_DIR, 'v7-inbound-spool.json') });
+const mirrorSpool = createDurableMirrorSpool({ journalFile: path.join(AUTH_DIR, 'v7-mirror-sync.ndjson') });
+const mediaSpool = createDurableMirrorSpool({ journalFile: path.join(AUTH_DIR, 'v7-media-sync.ndjson') });
+const MEDIA_DIR = path.join(AUTH_DIR, 'v7-media-pending');
+const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
+let mediaChain = Promise.resolve();
+let mediaBusy = false;
+let mediaTimer = null;
+let mirrorBusy = false;
+let mirrorTimer = null;
+let historyChain = Promise.resolve();
+let mirrorErrors = 0;
 const cryptoHealth = createCryptoHealth();
 let deliveryBusy = false;
 let receiptBusy = false;
@@ -101,6 +116,7 @@ function getStatus() {
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
     inboundDelivery: deliverer ? { ...deliverer.getStats(), ...inboundSpool.getStats() } : null,
+    mirrorSync: { ...mirrorSpool.getStats(), errors: mirrorErrors, media: mediaSpool.getStats() },
   };
 }
 
@@ -258,6 +274,182 @@ async function reportInboundReceipts() {
   } finally { receiptBusy = false; }
 }
 
+function mirrorQueue(event) {
+  // No AI decisions here. The SaaS /sync endpoint is observational-only.
+  // Historical provider IDs are identical to live IDs, avoiding duplicate rows.
+  const identity = event.kind === 'message'
+    ? `message:${event.providerMessageId}`
+    : 'chat:' + createHash('sha256').update(JSON.stringify(event)).digest('hex').slice(0, 36);
+  mirrorSpool.capture({ providerMessageId: identity, payload: event });
+}
+
+function localLidToPn(lid) {
+  return sock?.signalRepository?.lidMapping?.getPNForLID?.(lid);
+}
+
+async function mirrorMessage(msg, historical) {
+  const event = await normalizeMirrorMessage(msg, {
+    resolveLidPn: localLidToPn,
+    ownDigits: ownAccountDigits(),
+    historical,
+  });
+  if (event) {
+    mirrorQueue(event);
+    if (['IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT', 'STICKER'].includes(event.contentType)) {
+      mediaChain = mediaChain.then(() => cacheMedia(msg, event)).catch(error => {
+        mirrorErrors++;
+        console.warn('[v7-sync] media_cache_failed', String(error?.name || 'DOWNLOAD_ERROR'));
+      });
+    }
+  }
+}
+
+async function mirrorChat(chat) {
+  const event = await normalizeMirrorChat(chat, { resolveLidPn: localLidToPn });
+  if (event) mirrorQueue(event);
+}
+
+async function cacheMedia(msg, event) {
+  if (event.fileSize && event.fileSize > MAX_MEDIA_BYTES) return;
+  const id = 'media:' + event.providerMessageId;
+  if (mediaSpool.hasProviderMessageId(id)) return;
+  const downloaded = await downloadMediaMessage(msg, 'buffer', {}, {
+    logger, reuploadRequest: sock?.updateMediaMessage?.bind(sock),
+  });
+  const bytes = Buffer.from(downloaded);
+  if (!bytes.length || bytes.length>MAX_MEDIA_BYTES) return;
+  const key = createHash('sha256').update(id).digest('hex');
+  fs.mkdirSync(MEDIA_DIR, { recursive: true, mode: 0o700 });
+  const dest = path.join(MEDIA_DIR, key);
+  const temp = dest + '.tmp';
+  fs.writeFileSync(temp, bytes, { mode: 0o600 });
+  fs.renameSync(temp, dest);
+  mediaSpool.capture({
+    providerMessageId: id, payload: {
+      filePath: dest, messageId: event.providerMessageId,
+      mimeType: String(event.mimeType || 'application/octet-stream').split(';')[0].trim(),
+      fileName: event.fileName || '',
+    },
+  });
+  void flushMediaSpool();
+}
+
+async function flushMediaSpool() {
+  if (mediaBusy || stopping || !S2S_ENABLED || !process.env.DRVOWA_RUNTIME_TOKEN) return;
+  const pending = mediaSpool.getPendingForDelivery().slice(0, 6);
+  if (!pending.length) return;
+  mediaBusy = true;
+  try {
+    const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
+    for (const row of pending) {
+      const m = row.normalizedEvent.payload;
+      let success = false;
+      let code = 'MEDIA_NETWORK';
+      try {
+        const data = fs.readFileSync(m.filePath);
+        const response = await fetch(base + '/api/runtime/whatsapp/media', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + process.env.DRVOWA_RUNTIME_TOKEN,
+            'Content-Type': 'application/octet-stream',
+            'X-Drvo-Account-Key': ACCOUNT_KEY,
+            'X-Drvo-Provider-Message-Id': m.messageId,
+            'X-Drvo-Media-Mime': m.mimeType,
+            // Filenames with non-ASCII characters remain in the /sync metadata.
+            'X-Drvo-Media-Name': /^[\\x20-\\x7e]+$/.test(m.fileName) ? m.fileName : '',
+          },
+          body: data,
+          signal: AbortSignal.timeout(60000),
+        });
+        success = response.ok;
+        code = 'MEDIA_HTTP_' + response.status;
+      } catch(error) { code = String(error?.name || 'MEDIA_NETWORK'); }
+      if (success) {
+        mediaSpool.markDelivered(row.providerMessageId);
+        try { fs.unlinkSync(m.filePath); } catch { /* saved remote */ }
+      } else {
+        const retry = Math.min(180_000, 4000 * (2 ** Math.min(row.attempts || 0, 6)));
+        mediaSpool.markRetry(row.providerMessageId, {
+          nextRetryAt: new Date(Date.now() + retry).toISOString(), error: code,
+        });
+      }
+    }
+  } finally { mediaBusy = false; }
+}
+
+async function flushMirrorSpool() {
+  if (mirrorBusy || stopping || !S2S_ENABLED || !process.env.DRVOWA_RUNTIME_TOKEN) return;
+  const pending = mirrorSpool.getPendingForDelivery().slice(0, 24);
+  if (!pending.length) return;
+  mirrorBusy = true;
+  try {
+    const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
+    for (let i = 0; i < pending.length; i += 6) {
+      const batch = pending.slice(i, i + 6);
+      let okay = false;
+      let errorCode = 'NETWORK';
+      try {
+        const response = await fetch(base + '/api/runtime/whatsapp/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + process.env.DRVOWA_RUNTIME_TOKEN,
+          },
+          body: JSON.stringify({
+            accountKey: ACCOUNT_KEY,
+            events: batch.map(item => item.normalizedEvent.payload),
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        okay = response.ok;
+        errorCode = 'HTTP_' + response.status;
+      } catch (error) { errorCode = String(error?.name || 'NETWORK'); }
+      for (const item of batch) {
+        if (okay) mirrorSpool.markDelivered(item.providerMessageId);
+        else {
+          const delay = Math.min(120_000, 2000 * (2 ** Math.min(item.attempts || 0, 6)));
+          mirrorSpool.markRetry(item.providerMessageId, {
+            nextRetryAt: new Date(Date.now() + delay).toISOString(),
+            error: errorCode,
+          });
+        }
+      }
+      if (!okay) {
+        mirrorErrors++;
+        // Invalid payloads remain durable and visible; no silent drop.
+        console.warn('[v7-sync] pending_retry', errorCode);
+        break;
+      }
+    }
+  } finally { mirrorBusy = false; }
+}
+
+function scheduleMirrorMessage(msg, historical) {
+  historyChain = historyChain.then(() => mirrorMessage(msg, historical)).catch(err => {
+    mirrorErrors++;
+    console.error('[v7-sync] message_capture_failed', String(err?.name || 'SYNC_ERROR'));
+  });
+}
+
+function scheduleMirrorChat(chat) {
+  historyChain = historyChain.then(() => mirrorChat(chat)).catch(err => {
+    mirrorErrors++;
+    console.error('[v7-sync] chat_capture_failed', String(err?.name || 'SYNC_ERROR'));
+  });
+}
+
+function onHistorySet(data) {
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
+  const chats = Array.isArray(data?.chats) ? data.chats : [];
+  const contacts = Array.isArray(data?.contacts) ? data.contacts : [];
+  for (const chat of chats) scheduleMirrorChat(chat);
+  for (const contact of contacts) scheduleMirrorChat(contact);
+  for (const message of messages) scheduleMirrorMessage(message, true);
+  console.info('[v7-sync] history_batch', {
+    chats: chats.length, contacts: contacts.length, messages: messages.length,
+  });
+}
+
 function onMessagesUpsert(upsert) {
   const type = upsert?.type || 'unknown';
   const messages = Array.isArray(upsert?.messages) ? upsert.messages : [];
@@ -271,6 +463,7 @@ function onMessagesUpsert(upsert) {
       summary.decryptOutcome = 'outbound_observation_candidate';
       logInboundSafe(summary, type);
       maybeObserveOutbound(msg).catch(() => {});
+      scheduleMirrorMessage(msg, type !== 'notify');
       continue;
     }
 
@@ -280,6 +473,11 @@ function onMessagesUpsert(upsert) {
       continue;
     }
     const failurePmid = summary.messageId || msg?.key?.id || null;
+    // Live media is mirrored as an attachment; live text stays on the
+    // transactional /inbound AI scheduling path. Append history NEVER schedules.
+    if (type !== 'notify' || msg?.message?.imageMessage || msg?.message?.videoMessage
+       || msg?.message?.audioMessage || msg?.message?.documentMessage
+       || msg?.message?.stickerMessage) scheduleMirrorMessage(msg, type !== 'notify');
     if (summary.plaintextPresent === 'YES') {
       cryptoHealth.recordPlaintext();
       maybeDeliver(msg, type).catch((error) => {
@@ -322,7 +520,7 @@ async function startSocket() {
     },
     logger,
     browser: Browsers.ubuntu('DRVOWA-Baileys-V7'),
-    syncFullHistory: false,
+    syncFullHistory: process.env.V7_HISTORY_SYNC_ENABLED !== 'false',
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
   });
@@ -375,6 +573,11 @@ async function startSocket() {
     }
   });
   sock.ev.on('messages.upsert', onMessagesUpsert);
+  sock.ev.on('messaging-history.set', onHistorySet);
+  sock.ev.on('chats.upsert', chats => { for (const chat of chats || []) scheduleMirrorChat(chat); });
+  sock.ev.on('chats.update', chats => { for (const chat of chats || []) scheduleMirrorChat(chat); });
+  sock.ev.on('contacts.upsert', contacts => { for (const c of contacts || []) scheduleMirrorChat(c); });
+  sock.ev.on('contacts.update', contacts => { for (const c of contacts || []) scheduleMirrorChat(c); });
 }
 
 function enqueueSend(fn) {
@@ -449,6 +652,8 @@ async function shutdown() {
   stopping = true;
   if (inboundTimer) clearInterval(inboundTimer);
   if (receiptTimer) clearInterval(receiptTimer);
+  if (mirrorTimer) clearInterval(mirrorTimer);
+  if (mediaTimer) clearInterval(mediaTimer);
   setState('STOPPED');
   try {
     sock?.end?.(undefined);
@@ -518,6 +723,10 @@ async function main() {
   }));
 
   inboundTimer = setInterval(() => void flushInboundSpool(), 3000);
+  mirrorTimer = setInterval(() => void flushMirrorSpool(), 5000);
+  mediaTimer = setInterval(() => void flushMediaSpool(), 5000);
+  void flushMediaSpool();
+  void flushMirrorSpool();
   receiptTimer = setInterval(() => void reportInboundReceipts(), 30_000);
   void flushInboundSpool();
   void reportInboundReceipts();

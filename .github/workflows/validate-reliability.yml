@@ -20,5 +20,11 @@ jobs:
           node --check services/drvowa/baileysProvider.js
           node --check packages/baileys-v7-worker/src/worker.js
           node --check packages/baileys-v7-worker/src/saasDeliver.js
+          node --check packages/baileys-v7-worker/src/mirrorSync.js
+          node --check packages/baileys-v7-worker/src/durableMirrorSpool.js
       - name: Durable capture crash/retry regression
         run: node --test tests/reliability-spool.node.test.cjs
+      - name: Install Baileys v7 worker dependencies
+        run: npm --prefix packages/baileys-v7-worker ci --ignore-scripts
+      - name: History and media sync regression tests
+        run: npm --prefix packages/baileys-v7-worker test
