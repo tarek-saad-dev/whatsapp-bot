@@ -301,6 +301,7 @@ function createWhatsAppAccountManager({
     try {
       return await entry.queue.enqueue(() => entry.provider.send(phone, message, {
         idempotencyKey,
+        quotedMessage: payload && payload.quotedMessage,
       }));
     } catch (err) {
       if (err && err.code === 'QUEUE_FULL') {
