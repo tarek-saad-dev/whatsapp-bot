@@ -371,7 +371,7 @@ function createV7WorkerProvider({
     return reply.qr;
   }
 
-  async function send(phone, message, { idempotencyKey } = {}) {
+  async function send(phone, message, { idempotencyKey, quotedMessage = null } = {}) {
     const state = lastStatus.state;
     if (state === CONNECTION_STATES.LOGGED_OUT) {
       return {
@@ -395,6 +395,7 @@ function createV7WorkerProvider({
       accountKey,
       phone,
       message,
+      quotedMessage,
       idempotencyKey,
       store: idempotencyStore,
       numberSafety,
@@ -406,6 +407,7 @@ function createV7WorkerProvider({
           type: 'send',
           phone: p,
           message: m,
+          quotedMessage,
           idempotencyKey,
         }, 60_000);
         const result = reply.result || {};
