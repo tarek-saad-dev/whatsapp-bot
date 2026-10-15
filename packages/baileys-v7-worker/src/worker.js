@@ -7,6 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -36,7 +37,16 @@ if (!ACCOUNT_KEY || !AUTH_DIR) {
   process.exit(1);
 }
 
+// Same crash-safe atomic inbound spool used by the managed v6 runtime.
+const require = createRequire(import.meta.url);
+const { createInboxSpool } = require('../../../services/inbox/inboxSpool.js');
+const inboundSpool = createInboxSpool({ spoolFile: path.join(AUTH_DIR, 'v7-inbound-spool.json') });
 const cryptoHealth = createCryptoHealth();
+let deliveryBusy = false;
+let receiptBusy = false;
+let inboundTimer = null;
+let receiptTimer = null;
+
 
 const snapshot = {
   accountKey: ACCOUNT_KEY,
@@ -90,7 +100,7 @@ function getStatus() {
     reconnectAttempts: snapshot.reconnectAttempts,
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
-    inboundDelivery: deliverer ? deliverer.getStats() : null,
+    inboundDelivery: deliverer ? { ...deliverer.getStats(), ...inboundSpool.getStats() } : null,
   };
 }
 
@@ -183,7 +193,66 @@ async function maybeDeliver(msg, upsertType) {
     resolveLidPn,
   });
   if (!built.ok) return;
-  await deliverer.deliver(built.dto);
+  // Commit before network IO. A crash or network failure cannot lose a plaintext
+  // captured message; retries use the same providerMessageId / SaaS dedup key.
+  inboundSpool.capture(built.dto, { drvowaDto: built.dto });
+  void flushInboundSpool();
+}
+
+async function flushInboundSpool() {
+  if (deliveryBusy || stopping || !deliverer?.configured()) return;
+  deliveryBusy = true;
+  try {
+    for (const item of inboundSpool.getPendingForDelivery().slice(0, 40)) {
+      const outcome = await deliverer.deliver(item.drvowaDto || item.normalizedEvent);
+      if (outcome.ok) {
+        inboundSpool.markDelivered(item.providerMessageId);
+      } else if ([400, 422].includes(outcome.status)) {
+        inboundSpool.markQuarantined(item.providerMessageId, {
+          reason: outcome.code || 'INGEST_INVALID',
+        });
+      } else {
+        const delayMs = Math.min(60_000, 2000 * Math.pow(2, Math.min(5, item.attempts || 0)));
+        inboundSpool.markRetry(item.providerMessageId, {
+          nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
+          error: outcome.code || outcome.reason || 'NETWORK',
+        });
+        if (outcome.status === 401 || outcome.status === 403 || outcome.status === 404) break;
+      }
+    }
+  } catch (error) {
+    console.error('[v7-reliability] delivery_failed', String(error?.code || 'SPOOL_ERROR'));
+  } finally { deliveryBusy = false; }
+}
+
+async function reportInboundReceipts() {
+  if (receiptBusy || stopping || !S2S_ENABLED || !process.env.DRVOWA_RUNTIME_TOKEN) return;
+  const rows = inboundSpool.listRecent(100).filter(row => row.providerMessageId && row.capturedAt);
+  if (!rows.length) return;
+  receiptBusy = true;
+  try {
+    const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/\\/+$/, '');
+    const response = await fetch(base + '/api/runtime/whatsapp/receipts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + process.env.DRVOWA_RUNTIME_TOKEN,
+      },
+      body: JSON.stringify({
+        accountKey: ACCOUNT_KEY,
+        records: rows.map(row => ({
+          providerMessageId: row.providerMessageId,
+          capturedAt: row.capturedAt,
+          status: row.deliveryStatus === 'delivered' ? 'DELIVERED'
+            : row.deliveryStatus === 'failed' ? 'FAILED' : 'PENDING',
+        })),
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) console.warn('[v7-reliability] receipts_http', response.status);
+  } catch (error) {
+    console.warn('[v7-reliability] receipts_retry_next_tick', String(error?.name || 'NETWORK'));
+  } finally { receiptBusy = false; }
 }
 
 function onMessagesUpsert(upsert) {
@@ -373,6 +442,8 @@ async function handleSend({ phone, message, idempotencyKey }) {
 
 async function shutdown() {
   stopping = true;
+  if (inboundTimer) clearInterval(inboundTimer);
+  if (receiptTimer) clearInterval(receiptTimer);
   setState('STOPPED');
   try {
     sock?.end?.(undefined);
@@ -441,6 +512,10 @@ async function main() {
     s2sConfigured: deliverer.configured(),
   }));
 
+  inboundTimer = setInterval(() => void flushInboundSpool(), 3000);
+  receiptTimer = setInterval(() => void reportInboundReceipts(), 60_000);
+  void flushInboundSpool();
+  void reportInboundReceipts();
   setState('STARTING');
   await startSocket();
 
