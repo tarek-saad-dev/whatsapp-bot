@@ -105,6 +105,7 @@ async function sendManagedWithIdempotency({
   accountKey,
   phone,
   message,
+  quotedMessage = null,
   idempotencyKey: rawKey,
   store,
   sendFn,
@@ -123,7 +124,7 @@ async function sendManagedWithIdempotency({
     };
   }
   const idempotencyKey = keyCheck.idempotencyKey;
-  const payloadHash = hashPayload({ phone, message });
+  const payloadHash = hashPayload({ phone, message, quotedMessage });
   const existing = store.get(idempotencyKey);
 
   if (existing) {
