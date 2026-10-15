@@ -10,6 +10,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { normalizeMirrorChat, normalizeMirrorMessage } from './mirrorSync.js';
+import { createDurableMirrorSpool } from './durableMirrorSpool.js';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -44,8 +45,8 @@ if (!ACCOUNT_KEY || !AUTH_DIR) {
 const require = createRequire(import.meta.url);
 const { createInboxSpool } = require('../../../services/inbox/inboxSpool.js');
 const inboundSpool = createInboxSpool({ spoolFile: path.join(AUTH_DIR, 'v7-inbound-spool.json') });
-const mirrorSpool = createInboxSpool({ spoolFile: path.join(AUTH_DIR, 'v7-mirror-spool.json') });
-const mediaSpool = createInboxSpool({ spoolFile: path.join(AUTH_DIR, 'v7-media-spool.json') });
+const mirrorSpool = createDurableMirrorSpool({ journalFile: path.join(AUTH_DIR, 'v7-mirror-sync.ndjson') });
+const mediaSpool = createDurableMirrorSpool({ journalFile: path.join(AUTH_DIR, 'v7-media-sync.ndjson') });
 const MEDIA_DIR = path.join(AUTH_DIR, 'v7-media-pending');
 const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 let mediaChain = Promise.resolve();
