@@ -250,7 +250,11 @@ function createBaileysProvider({
     return getStatus();
   }
 
-  async function send(phone, message, { idempotencyKey } = {}) {
+  async function send(phone, message, { idempotencyKey, quotedMessage = null } = {}) {
+    if (quotedMessage) return {
+      success: false, status: 'failed', code: 'QUOTED_REPLY_V7_REQUIRED',
+      error: 'Quoted replies require Baileys v7', sendAttempted: false, httpStatus: 409,
+    };
     const state = deriveState();
     if (state === CONNECTION_STATES.LOGGED_OUT) {
       return {
