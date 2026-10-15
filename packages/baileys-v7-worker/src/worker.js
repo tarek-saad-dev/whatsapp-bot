@@ -231,7 +231,7 @@ async function reportInboundReceipts() {
   if (!rows.length) return;
   receiptBusy = true;
   try {
-    const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/\\/+$/, '');
+    const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (let start = 0; start < rows.length; start += 100) {
       const batch = rows.slice(start, start + 100);
       const response = await fetch(base + '/api/runtime/whatsapp/receipts', {
