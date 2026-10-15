@@ -164,6 +164,44 @@ function createBaileysProvider({
     },
   });
 
+  let receiptTimer = null;
+  let receiptBusy = false;
+  async function reportInboundReceipts() {
+    const token = process.env.DRVOWA_RUNTIME_TOKEN;
+    if (receiptBusy || !token || typeof fetchImpl !== 'function') return;
+    const rows = spool.listRecent(500).filter((row) => row.providerMessageId && row.capturedAt);
+    if (!rows.length) return;
+    receiptBusy = true;
+    try {
+      const { getDrvowaSaasBaseUrl } = require('./s2sAuth');
+      for (let start = 0; start < rows.length; start += 100) {
+        const batch = rows.slice(start, start + 100);
+        const response = await fetchImpl(getDrvowaSaasBaseUrl() + '/api/runtime/whatsapp/receipts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({
+            accountKey,
+            records: batch.map((row) => ({
+              providerMessageId: row.providerMessageId,
+              capturedAt: row.capturedAt,
+              status: row.deliveryStatus === 'delivered' ? 'DELIVERED'
+                : row.deliveryStatus === 'failed' ? 'FAILED' : 'PENDING',
+            })),
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!response.ok) {
+          logger.warn?.('[drvowa-reliability] receipt_http', { status: response.status });
+          break;
+        }
+      }
+    } catch (error) {
+      logger.warn?.('[drvowa-reliability] receipts_next_tick', {
+        code: error?.name || 'NETWORK',
+      });
+    } finally { receiptBusy = false; }
+  }
+
   function deriveState() {
     if (explicitState === CONNECTION_STATES.STARTING
       || explicitState === CONNECTION_STATES.STOPPING) {
@@ -191,6 +229,8 @@ function createBaileysProvider({
       explicitState = CONNECTION_STATES.CONNECTING;
       await transport.start();
       outboundObservationWorker.start();
+      if (!receiptTimer) receiptTimer = setInterval(() => void reportInboundReceipts(), 30_000);
+      void reportInboundReceipts();
       explicitState = deriveState();
       return getStatus();
     } catch (err) {
@@ -203,6 +243,8 @@ function createBaileysProvider({
   async function stop() {
     explicitState = CONNECTION_STATES.STOPPING;
     outboundObservationWorker.stop();
+    if (receiptTimer) clearInterval(receiptTimer);
+    receiptTimer = null;
     await transport.stop();
     explicitState = CONNECTION_STATES.STOPPED;
     return getStatus();
