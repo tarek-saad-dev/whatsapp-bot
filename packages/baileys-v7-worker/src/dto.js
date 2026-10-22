@@ -1,6 +1,7 @@
 ﻿'use strict';
 
 import { isLidUser, isPnUser, jidNormalizedUser } from '@whiskeysockets/baileys';
+import { blockedSourceReason } from './sourcePolicy.js';
 
 /**
  * Build DRVOWA inbound DTO from a decrypted Baileys v7 message.
@@ -63,9 +64,8 @@ export async function buildV7InboundDto(msg, {
   const key = msg?.key || {};
   if (key.fromMe) return { ok: false, reason: 'fromMe' };
   const remote = String(key.remoteJid || '');
-  if (remote.endsWith('@g.us') || remote === 'status@broadcast') {
-    return { ok: false, reason: 'group_or_status' };
-  }
+  const blockedReason = blockedSourceReason(msg);
+  if (blockedReason) return { ok: false, reason: blockedReason };
   const text = extractPlainText(msg);
   if (!text || !String(text).trim()) return { ok: false, reason: 'no_plaintext' };
 
@@ -101,6 +101,8 @@ export async function buildV7InboundDto(msg, {
       externalContactKey,
       fromMe: false,
       isGroup: false,
+      sourceRemoteJid: remote,
+      ...(msg.broadcast === true ? { sourceIsBroadcast: true } : {}),
       messageTimestamp: ts,
       receivedAt,
       upsertType: 'notify',
