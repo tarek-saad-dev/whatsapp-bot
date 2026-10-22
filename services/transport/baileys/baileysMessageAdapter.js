@@ -337,6 +337,7 @@ function mapBaileysInbound(msg, {
         sourceUpsertType: sourceUpsertType || 'notify',
         logicalUpsertType: logicalUpsertType || 'notify',
         sourceRemoteJid: remoteJid,
+        sourceIsBroadcast: Boolean(msg.broadcast),
         resolvedCustomerJid: customerJid,
     };
 
