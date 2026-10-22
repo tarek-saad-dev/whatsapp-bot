@@ -28,15 +28,25 @@ function logInbound(logger, event, fields = {}) {
  * accountKey always comes from managed provider context — never from WA body.
  */
 function dtoFromSpoolRecord(record, accountKey) {
+  const n = record.normalizedEvent || {};
   if (record.drvowaDto && typeof record.drvowaDto === 'object') {
+    const oldDto = record.drvowaDto;
+    // Old durable DTOs may predate source metadata. Recover it from the
+    // Baileys capture envelope so queued group/status items cannot bypass SaaS.
+    const originalJid = oldDto.sourceRemoteJid
+      || n.rawPayload?.sourceRemoteJid
+      || n.rawPayload?.baileysKey?.remoteJid
+      || null;
     return {
-      ...record.drvowaDto,
+      ...oldDto,
+      ...(originalJid ? { sourceRemoteJid: originalJid } : {}),
+      ...(oldDto.sourceIsBroadcast || n.rawPayload?.sourceIsBroadcast
+        ? { sourceIsBroadcast: true } : {}),
       accountKey,
       provider: 'baileys',
     };
   }
 
-  const n = record.normalizedEvent || {};
   return buildDrvowaInboundDto({
     accountKey,
     providerMessageId: record.providerMessageId || n.providerMessageId,
