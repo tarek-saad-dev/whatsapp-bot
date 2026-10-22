@@ -66,6 +66,34 @@ describe('DRVOWA Phase 3A Part 2 inbound delivery', () => {
     return { spool, worker };
   }
 
+  it('recovers original group/status JID from durable legacy spool records', () => {
+    const dto = buildDrvowaInboundDto({
+      accountKey: 'old-account',
+      providerMessageId: 'old-group-1',
+      externalContactKey: '201555123456',
+      content: 'legacy captured group message',
+    });
+    const record = {
+      providerMessageId: 'old-group-1',
+      drvowaDto: dto,
+      normalizedEvent: makeNormalized('old-group-1', {
+        rawPayload: {
+          sourceRemoteJid: '12036300000000000@g.us',
+          sourceIsBroadcast: false,
+        },
+      }),
+    };
+    const hydrated = dtoFromSpoolRecord(record, 'saas-account');
+    expect(hydrated.sourceRemoteJid).toBe('12036300000000000@g.us');
+    expect(hydrated.accountKey).toBe('saas-account');
+
+    record.normalizedEvent.rawPayload.sourceRemoteJid = 'status@broadcast';
+    record.normalizedEvent.rawPayload.sourceIsBroadcast = true;
+    const story = dtoFromSpoolRecord(record, 'saas-account');
+    expect(story.sourceRemoteJid).toBe('status@broadcast');
+    expect(story.sourceIsBroadcast).toBe(true);
+  });
+
   it('1. managed inbound persists before HTTP delivery', async () => {
     let resolveFetch;
     const fetchImpl = vi.fn(
