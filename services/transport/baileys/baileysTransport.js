@@ -19,6 +19,7 @@ const {
     shouldProcessUpsert,
     mapBaileysInbound,
     mapBaileysOutboundObserved,
+    blockedSourceReason,
     createLidPhoneCache,
     buildRawUpsertSample,
 } = require('./baileysMessageAdapter');
@@ -511,7 +512,10 @@ function createBaileysTransport({
                     providerMessageId: mapped.providerMessageId,
                     externalContactKey: mapped.phone || mapped.normalized?.phone || null,
                     fromMe: false,
-                    isGroup: Boolean(mapped.normalized?.isGroup),
+                    isGroup: Boolean(mapped.normalized?.isGroup)
+                        || String(msg?.key?.remoteJid || '').endsWith('@g.us'),
+                    sourceRemoteJid: String(msg?.key?.remoteJid || ''),
+                    sourceIsBroadcast: Boolean(msg?.broadcast),
                     messageTimestamp: mapped.normalized?.messageTimestamp
                         || msg.messageTimestamp
                         || null,
@@ -731,6 +735,14 @@ function createBaileysTransport({
         for (const msg of upsert.messages || []) {
             const captureStartedAt = utcNow();
             const mid = String(msg?.key?.id || '').trim();
+            const blockedOrigin = blockedSourceReason(msg);
+            if (blockedOrigin) {
+                logInbox('baileys_upsert_ignored', {
+                    reason: blockedOrigin,
+                    messageId: mid || null,
+                });
+                continue;
+            }
 
             // Per-message gate:
             // - notify → live path
