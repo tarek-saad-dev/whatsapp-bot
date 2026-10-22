@@ -28,6 +28,7 @@ import { buildV7InboundDto } from './dto.js';
 import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
+import { blockedSourceReason } from './sourcePolicy.js';
 
 const logger = pino({ level: process.env.V7_WORKER_LOG_LEVEL || 'warn' });
 
@@ -134,12 +135,7 @@ async function writeQr(qr) {
 }
 
 function shouldIgnoreUpsert(msg) {
-  const key = msg?.key || {};
-  // fromMe is NOT discarded here — handled as outbound observation.
-  const remote = String(key.remoteJid || '');
-  if (remote.endsWith('@g.us')) return 'group';
-  if (remote === 'status@broadcast') return 'status';
-  return null;
+  return blockedSourceReason(msg);
 }
 
 function ownAccountDigits() {
@@ -458,6 +454,13 @@ function onMessagesUpsert(upsert) {
     const summary = summarizeInbound(msg);
     summary.upsertType = type;
 
+    const ignore = shouldIgnoreUpsert(msg);
+    if (ignore) {
+      // Group/broadcasts have individual participants but aren't private chats.
+      logInboundSafe(summary, type);
+      continue;
+    }
+
     // Outbound observation path (manual phone / API echo) — never inbound ingest.
     if (key.fromMe) {
       summary.decryptOutcome = 'outbound_observation_candidate';
@@ -467,11 +470,6 @@ function onMessagesUpsert(upsert) {
       continue;
     }
 
-    const ignore = shouldIgnoreUpsert(msg);
-    if (ignore === 'group' || ignore === 'status') {
-      logInboundSafe(summary, type);
-      continue;
-    }
     const failurePmid = summary.messageId || msg?.key?.id || null;
     // Live media is mirrored as an attachment; live text stays on the
     // transactional /inbound AI scheduling path. Append history NEVER schedules.
