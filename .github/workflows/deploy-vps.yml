@@ -12,7 +12,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Check Baileys message admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install v6 and v7 locked dependencies
+        run: |
+          npm ci --ignore-scripts
+          npm --prefix packages/baileys-v7-worker ci --ignore-scripts
+      - name: Syntax check inbound and origin paths
+        run: |
+          node --check services/transport/baileys/baileysMessageAdapter.js
+          node --check services/transport/baileys/baileysTransport.js
+          node --check services/drvowa/inboundDto.js
+          node --check services/drvowa/baileysProvider.js
+          node --check packages/baileys-v7-worker/src/worker.js
+          node --check packages/baileys-v7-worker/src/dto.js
+          node --check packages/baileys-v7-worker/src/mirrorSync.js
+      - name: Verify v6 group and status regression
+        run: npx vitest run tests/unit/baileysTransport.test.js tests/unit/drvowaInboundDelivery.test.js
+      - name: Verify v7 group and status regression
+        run: npm --prefix packages/baileys-v7-worker test
+
   deploy:
+    needs: verify
     name: Deploy Production
     runs-on: ubuntu-latest
     timeout-minutes: 15
