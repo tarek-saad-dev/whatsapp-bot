@@ -28,6 +28,24 @@ function isBlockedRemoteJid(remoteJid) {
     return false;
 }
 
+/**
+ * Original chat identity is authoritative; senderPn / participantPn identify
+ * the author of a group/status, not a private chat.
+ * Preserve private @lid resolution by not using isAllowedRemoteJid here.
+ */
+function blockedSourceReason(msg) {
+    if (msg?.broadcast === true) return 'broadcast';
+    for (const source of [msg?.key?.remoteJid, msg?.key?.remoteJidAlt]) {
+        const jid = String(source || '').trim().toLowerCase();
+        if (jid.endsWith('@g.us')) return 'group';
+        if (jid.endsWith('@broadcast')) return 'broadcast';
+        if (jid.endsWith('@newsletter')) return 'newsletter';
+        if (jid.endsWith('@call')) return 'call';
+    }
+    if (!String(msg?.key?.remoteJid || '').trim()) return 'missing_remote_jid';
+    return null;
+}
+
 function isGroupJid(remoteJid) {
     return String(remoteJid || '').endsWith('@g.us');
 }
@@ -244,6 +262,10 @@ function mapBaileysInbound(msg, {
     }
 
     const remoteJid = String(key.remoteJid || '');
+    const blockedReason = blockedSourceReason(msg);
+    if (blockedReason) {
+        return { action: 'ignore', reason: blockedReason, remoteJid };
+    }
     const customerJid = resolveCustomerJid(key, lidCache);
     if (isLidUser(remoteJid) && lidCache) {
         const senderPn = String(key.senderPn || key.participantPn || '').trim();
@@ -344,8 +366,11 @@ function mapBaileysOutboundObserved(msg, {
     }
 
     const remoteJid = String(key.remoteJid || '');
-    // Do NOT early-block @lid: resolve LID → phone via cache/senderPn first
-    // (same pattern as inbound). Broadcast/status still fail isAllowedRemoteJid.
+    // Group or broadcast source must never masquerade as a direct outbound.
+    const blockedReason = blockedSourceReason(msg);
+    if (blockedReason) {
+        return { action: 'ignore', reason: blockedReason, remoteJid };
+    }
     if (isGroupJid(remoteJid) && !includeGroups) {
         return { action: 'ignore', reason: 'group', remoteJid };
     }
@@ -431,6 +456,7 @@ module.exports = {
     LIVE_UPSERT_TYPE,
     isLiveUpsertType,
     isBlockedRemoteJid,
+    blockedSourceReason,
     isGroupJid,
     isAllowedRemoteJid,
     createLidPhoneCache,
