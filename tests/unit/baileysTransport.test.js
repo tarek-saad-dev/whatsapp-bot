@@ -19,6 +19,7 @@ const {
     isProtocolOrSystemMessage,
     shouldProcessUpsert,
     mapBaileysInbound,
+    mapBaileysOutboundObserved,
     buildDedupeKey,
     createLidPhoneCache,
 } = require('../../services/transport/baileys/baileysMessageAdapter');
@@ -79,7 +80,60 @@ describe('baileysMessageAdapter', () => {
         });
         const result = mapBaileysInbound(msg, { includeGroups: false });
         expect(result.action).toBe('ignore');
-        expect(result.reason).toBe('blocked_jid');
+        expect(result.reason).toBe('group');
+    });
+
+    it('does not convert group authors into private customers even with participantPn', () => {
+        for (const includeGroups of [false, true]) {
+            const msg = makeInboundMsg({ remoteJid: '120363000000000000@g.us', id: 'GROUP123' });
+            msg.key.participantPn = '201555123456@s.whatsapp.net';
+            msg.key.senderPn = '201555123456@s.whatsapp.net';
+            const seen = new Set();
+            const result = mapBaileysInbound(msg, { includeGroups, seenKeys: seen });
+            expect(result).toMatchObject({ action: 'ignore', reason: 'group' });
+            expect(seen.size).toBe(0);
+        }
+    });
+
+    it('ignores a status even if senderPn makes it look like a normal private chat', () => {
+        for (const mediaMessage of [
+            { conversation: 'status text' },
+            { imageMessage: { caption: 'status caption' } },
+            { videoMessage: { caption: 'status caption' } },
+        ]) {
+            const msg = makeInboundMsg({ remoteJid: 'status@broadcast', message: mediaMessage });
+            msg.key.senderPn = '201555123456@s.whatsapp.net';
+            expect(mapBaileysInbound(msg)).toMatchObject({ action: 'ignore', reason: 'broadcast' });
+        }
+    });
+
+    it('rejects a broadcast flag and an alternative group JID before phone remapping', () => {
+        const flagged = makeInboundMsg();
+        flagged.broadcast = true;
+        expect(mapBaileysInbound(flagged).action).toBe('ignore');
+
+        const alternate = makeInboundMsg();
+        alternate.key.remoteJidAlt = '120363000000000000@g.us';
+        expect(mapBaileysInbound(alternate)).toMatchObject({ action: 'ignore', reason: 'group' });
+    });
+
+    it('continues to accept genuine private messages with participantPn and LID mapping', () => {
+        const direct = makeInboundMsg({ id: 'DM1' });
+        direct.key.senderPn = '201555123456@s.whatsapp.net';
+        expect(mapBaileysInbound(direct).action).toBe('capture');
+
+        const lidDm = makeInboundMsg({ remoteJid: '213262457151524@lid', id: 'LID-DM1' });
+        lidDm.key.senderPn = '201555123456@s.whatsapp.net';
+        expect(mapBaileysInbound(lidDm).action).toBe('capture');
+    });
+
+    it('never observes a broadcast or group outbound as a private human response', () => {
+        const group = makeInboundMsg({ remoteJid: '120363000000000000@g.us', fromMe: true });
+        group.key.participantPn = '201555123456@s.whatsapp.net';
+        expect(mapBaileysOutboundObserved(group).action).toBe('ignore');
+        const status = makeInboundMsg({ remoteJid: 'status@broadcast', fromMe: true });
+        status.key.senderPn = '201555123456@s.whatsapp.net';
+        expect(mapBaileysOutboundObserved(status).action).toBe('ignore');
     });
 
     it('ignores status and broadcast jids', () => {
