@@ -141,6 +141,8 @@ function createBaileysProvider({
         externalContactKey: event.externalContactKey,
         fromMe: event.fromMe,
         isGroup: event.isGroup,
+        sourceRemoteJid: event.sourceRemoteJid,
+        sourceIsBroadcast: event.sourceIsBroadcast,
         messageTimestamp: event.messageTimestamp,
         receivedAt: event.receivedAt,
         upsertType: event.upsertType,
