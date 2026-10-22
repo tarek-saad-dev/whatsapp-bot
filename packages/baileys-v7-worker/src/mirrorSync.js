@@ -42,7 +42,12 @@ export async function normalizeMirrorMessage(msg, {
 } = {}) {
   const key = msg?.key || {};
   const remote = String(key.remoteJid || '');
-  if (!key.id || remote.endsWith('@g.us') || remote.includes('@broadcast')) return null;
+  if (!key.id || remote.endsWith('@g.us') || remote.includes('@broadcast')
+      || Boolean(msg?.broadcast)
+      || String(key.remoteJidAlt || '').endsWith('@g.us')
+      || String(key.remoteJidAlt || '').endsWith('@broadcast')
+      || remote.endsWith('@newsletter')
+      || remote.endsWith('@call')) return null;
   const contactKey = await resolveContact(msg, { resolveLidPn, ownDigits });
   if (!contactKey) return null;
   const content = msg?.message || {};
