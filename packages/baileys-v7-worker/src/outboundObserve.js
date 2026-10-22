@@ -122,9 +122,15 @@ export async function buildV7OutboundObservation(msg, {
   if (!key.fromMe) return { ok: false, reason: 'not_fromMe' };
 
   const remote = String(key.remoteJid || '');
-  if (remote.endsWith('@g.us')) return { ok: false, reason: 'group' };
-  if (remote === 'status@broadcast' || remote.endsWith('@broadcast')) {
-    return { ok: false, reason: 'status_or_broadcast' };
+  for (const source of [remote, key.remoteJidAlt]) {
+    const jid = String(source || '').trim().toLowerCase();
+    if (jid.endsWith('@g.us')) return { ok: false, reason: 'group' };
+    if (jid.endsWith('@broadcast') || msg.broadcast === true) {
+      return { ok: false, reason: 'status_or_broadcast' };
+    }
+    if (jid.endsWith('@newsletter') || jid.endsWith('@call')) {
+      return { ok: false, reason: 'unsupported_source' };
+    }
   }
 
   if (isProtocolOrSystem(msg)) return { ok: false, reason: 'protocol_or_system' };
