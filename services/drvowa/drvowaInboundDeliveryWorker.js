@@ -43,6 +43,10 @@ function dtoFromSpoolRecord(record, accountKey) {
     externalContactKey: n.phone || n.externalContactKey || null,
     fromMe: n.direction === 'outbound' || n.fromMe === true,
     isGroup: Boolean(n.isGroup),
+    sourceRemoteJid: n.rawPayload?.sourceRemoteJid
+      || n.rawPayload?.baileysKey?.remoteJid
+      || null,
+    sourceIsBroadcast: Boolean(n.rawPayload?.sourceIsBroadcast),
     messageTimestamp: n.messageTimestamp != null ? n.messageTimestamp : null,
     receivedAt: n.receivedAt || record.capturedAt || new Date().toISOString(),
     upsertType: n.upsertType || 'notify',
