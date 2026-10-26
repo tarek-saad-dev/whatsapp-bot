@@ -72,6 +72,8 @@ export function createSaasDeliverer({
         || parsed?.code === 'DUPLICATE',
       );
       if (res.status >= 200 && res.status < 300) {
+        // Do not keep an old HTTP/auth error after a successful delivery.
+        stats.lastErrorCode = null;
         delivered.add(pmid);
         if (duplicate) stats.duplicate += 1;
         else stats.accepted += 1;
