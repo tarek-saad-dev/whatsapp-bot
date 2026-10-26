@@ -116,7 +116,13 @@ function getStatus() {
     reconnectAttempts: snapshot.reconnectAttempts,
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
-    inboundDelivery: deliverer ? { ...deliverer.getStats(), ...inboundSpool.getStats() } : null,
+    // The SaaS dashboard must distinguish a stopped delivery timer from an
+    // older runtime omitting the liveness field. V6 already reports "running".
+    inboundDelivery: deliverer ? {
+      ...deliverer.getStats(),
+      ...inboundSpool.getStats(),
+      running: Boolean(inboundTimer && !stopping && deliverer.configured()),
+    } : null,
     mirrorSync: { ...mirrorSpool.getStats(), errors: mirrorErrors, media: mediaSpool.getStats() },
   };
 }
