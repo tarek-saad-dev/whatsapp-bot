@@ -174,6 +174,10 @@ function createBaileysTransport({
             reconnectAttempts,
             seenKeyCount: seenKeys.size,
             lidMappings: lidCache.size(),
+            labelSync: {
+                coverage: 'EVENT_DRIVEN_PARTIAL', observed: labelEventsSeen,
+                skipped: labelEventsSkipped, audienceReady: false,
+            },
             unresolvedLidCount,
             lidMapFile,
             authDir,
