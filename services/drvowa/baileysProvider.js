@@ -17,6 +17,7 @@ const {
 const {
   createOutboundObservationSpool,
 } = require('./outboundObservationSpool');
+const { createLabelSyncDelivery } = require('./labelSyncDelivery');
 const {
   createManagedOutboundObserver,
 } = require('./managedOutboundObserver');
@@ -78,6 +79,7 @@ function createBaileysProvider({
     throw new Error('Managed account authDir must not use legacy baileys-auth path');
   }
 
+  const labelDelivery = createLabelSyncDelivery({ accountKey, authDir, fetchImpl, logger });
   const inboundEvents = [];
   let explicitState = CONNECTION_STATES.STOPPED;
   let lastErrorCode = null;
@@ -134,6 +136,7 @@ function createBaileysProvider({
         onLoggedOut({ accountKey });
       }
     },
+    onLabelEvent: (event) => labelDelivery.capture(event),
     onLiveInbound: (event) => {
       const dto = buildDrvowaInboundDto({
         accountKey,
@@ -229,6 +232,7 @@ function createBaileysProvider({
     explicitState = CONNECTION_STATES.STARTING;
     try {
       explicitState = CONNECTION_STATES.CONNECTING;
+      labelDelivery.start();
       await transport.start();
       outboundObservationWorker.start();
       if (!receiptTimer) receiptTimer = setInterval(() => void reportInboundReceipts(), 30_000);
@@ -236,6 +240,7 @@ function createBaileysProvider({
       explicitState = deriveState();
       return getStatus();
     } catch (err) {
+      labelDelivery.stop();
       explicitState = CONNECTION_STATES.ERROR;
       lastErrorCode = 'START_FAILED';
       throw err;
@@ -245,6 +250,7 @@ function createBaileysProvider({
   async function stop() {
     explicitState = CONNECTION_STATES.STOPPING;
     outboundObservationWorker.stop();
+    labelDelivery.stop();
     if (receiptTimer) clearInterval(receiptTimer);
     receiptTimer = null;
     await transport.stop();
@@ -309,6 +315,11 @@ function createBaileysProvider({
         || null,
       reconnectAttempts: transportStatus.reconnectAttempts || 0,
       authDir,
+      labelSync: {
+        ...labelDelivery.getStatus(),
+        observed: transportStatus.labelSync?.observed ?? 0,
+        skipped: transportStatus.labelSync?.skipped ?? 0,
+      },
       inboundDelivery: {
         running: Boolean(delivery.running),
         pending: delivery.pending ?? 0,

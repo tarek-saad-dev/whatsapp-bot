@@ -8,8 +8,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { normalizeMirrorChat, normalizeMirrorMessage } from './mirrorSync.js';
+import { normalizeLabelEdit, normalizeLabelAssociation } from './labelSync.js';
 import { createDurableMirrorSpool } from './durableMirrorSpool.js';
 import makeWASocket, {
   DisconnectReason,
@@ -57,6 +58,8 @@ let mirrorBusy = false;
 let mirrorTimer = null;
 let historyChain = Promise.resolve();
 let mirrorErrors = 0;
+let labelEventsSeen = 0;
+let labelEventsSkipped = 0;
 const cryptoHealth = createCryptoHealth();
 let deliveryBusy = false;
 let receiptBusy = false;
@@ -124,6 +127,8 @@ function getStatus() {
       running: Boolean(inboundTimer && !stopping && deliverer.configured()),
     } : null,
     mirrorSync: { ...mirrorSpool.getStats(), errors: mirrorErrors, media: mediaSpool.getStats() },
+    labelSync: { coverage: 'EVENT_DRIVEN_PARTIAL', observed: labelEventsSeen,
+      skipped: labelEventsSkipped, audienceReady: false },
   };
 }
 
@@ -281,7 +286,9 @@ function mirrorQueue(event) {
   // Historical provider IDs are identical to live IDs, avoiding duplicate rows.
   const identity = event.kind === 'message'
     ? `message:${event.providerMessageId}`
-    : 'chat:' + createHash('sha256').update(JSON.stringify(event)).digest('hex').slice(0, 36);
+    : event.kind === 'chat'
+      ? 'chat:' + createHash('sha256').update(JSON.stringify(event)).digest('hex').slice(0, 36)
+      : 'label-event:' + randomUUID(); // add -> remove -> add must not be deduped away.
   mirrorSpool.capture({ providerMessageId: identity, payload: event });
 }
 
@@ -440,6 +447,31 @@ function scheduleMirrorChat(chat) {
   });
 }
 
+function scheduleLabelEdit(label) {
+  // All events go through the same crash-safe delivery spool as mirror history.
+  historyChain = historyChain.then(() => {
+    const normalized = normalizeLabelEdit(label);
+    if (!normalized) { labelEventsSkipped++; return; }
+    labelEventsSeen++;
+    mirrorQueue(normalized);
+  }).catch(err => {
+    mirrorErrors++;
+    console.warn('[v7-label] capture_failed', String(err?.name || 'SYNC_ERROR'));
+  });
+}
+
+function scheduleLabelAssociation(payload) {
+  historyChain = historyChain.then(async () => {
+    const normalized = await normalizeLabelAssociation(payload, { resolveLidPn: localLidToPn });
+    if (!normalized) { labelEventsSkipped++; return; }
+    labelEventsSeen++;
+    mirrorQueue(normalized);
+  }).catch(err => {
+    mirrorErrors++;
+    console.warn('[v7-label] capture_failed', String(err?.name || 'SYNC_ERROR'));
+  });
+}
+
 function onHistorySet(data) {
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const chats = Array.isArray(data?.chats) ? data.chats : [];
@@ -578,6 +610,8 @@ async function startSocket() {
   });
   sock.ev.on('messages.upsert', onMessagesUpsert);
   sock.ev.on('messaging-history.set', onHistorySet);
+  sock.ev.on('labels.edit', scheduleLabelEdit);
+  sock.ev.on('labels.association', scheduleLabelAssociation);
   sock.ev.on('chats.upsert', chats => { for (const chat of chats || []) scheduleMirrorChat(chat); });
   sock.ev.on('chats.update', chats => { for (const chat of chats || []) scheduleMirrorChat(chat); });
   sock.ev.on('contacts.upsert', contacts => { for (const c of contacts || []) scheduleMirrorChat(c); });

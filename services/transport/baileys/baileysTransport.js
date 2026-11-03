@@ -12,6 +12,7 @@ const {
 } = require('@whiskeysockets/baileys');
 
 const { createInboxSpool } = require('../../inbox/inboxSpool');
+const { normalizeLabelEdit, normalizeLabelAssociation } = require('./labelSync');
 const { createInboxDeliveryWorker } = require('../../inbox/inboxDeliveryWorker');
 const { utcNow, isoBetween } = require('../../inbox/inboxTiming');
 const { logInbox } = require('../../inbox/inboxLogger');
@@ -53,6 +54,7 @@ function createBaileysTransport({
     fetchVersion = fetchLatestBaileysVersion,
     outboundStore = null,
     onLiveInbound = null,
+    onLabelEvent = null,
     printQrToTerminal = true,
     onLoggedOut = null,
 } = {}) {
@@ -104,6 +106,8 @@ function createBaileysTransport({
     };
     let authLoaded = false;
     let getMessageStoreInitialized = true;
+    let labelEventsSkipped = 0;
+    let labelEventsSeen = 0;
     let lastOutboundAt = null;
     let lastOutboundAckAt = null;
     let lastOutboundProviderMessageId = null;
@@ -170,6 +174,10 @@ function createBaileysTransport({
             reconnectAttempts,
             seenKeyCount: seenKeys.size,
             lidMappings: lidCache.size(),
+            labelSync: {
+                coverage: 'EVENT_DRIVEN_PARTIAL', observed: labelEventsSeen,
+                skipped: labelEventsSkipped, audienceReady: false,
+            },
             unresolvedLidCount,
             lidMapFile,
             authDir,
@@ -289,6 +297,8 @@ function createBaileysTransport({
             current.ev.removeAllListeners('chats.upsert');
             current.ev.removeAllListeners('chats.update');
             current.ev.removeAllListeners('messaging-history.set');
+            current.ev.removeAllListeners('labels.edit');
+            current.ev.removeAllListeners('labels.association');
             currentSocketListenersAttached = {
                 messagesUpsert: 0,
                 messagesUpdate: 0,
@@ -971,6 +981,29 @@ function createBaileysTransport({
             }
             for (const chat of payload.chats || []) {
                 lidCache.rememberChat(chat, 'messaging-history.set.chat');
+            }
+        });
+
+        socket.ev.on('labels.edit', (payload) => {
+            if (sock !== socket || generation !== connectGeneration || typeof onLabelEvent !== 'function') return;
+            try {
+                const event = normalizeLabelEdit(payload);
+                if (!event) { labelEventsSkipped++; return; }
+                onLabelEvent(event);
+                labelEventsSeen++;
+            } catch (err) {
+                logger.warn?.('[baileys-label] capture_failed', { code: err?.name || 'CAPTURE_ERROR' });
+            }
+        });
+        socket.ev.on('labels.association', (payload) => {
+            if (sock !== socket || generation !== connectGeneration || typeof onLabelEvent !== 'function') return;
+            try {
+                const event = normalizeLabelAssociation(payload, lid => lidCache.resolvePn(lid));
+                if (!event) { labelEventsSkipped++; return; }
+                onLabelEvent(event);
+                labelEventsSeen++;
+            } catch (err) {
+                logger.warn?.('[baileys-label] capture_failed', { code: err?.name || 'CAPTURE_ERROR' });
             }
         });
 
