@@ -1,6 +1,8 @@
 'use strict';
 
-const { describe, it, expect } = require('vitest');
+import { describe, it, expect } from 'vitest';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 const { normalizeLabelEdit, normalizeLabelAssociation } = require('../../services/transport/baileys/labelSync');
 
 describe('Baileys V6 label events', () => {
