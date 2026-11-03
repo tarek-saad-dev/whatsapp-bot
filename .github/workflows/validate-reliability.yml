@@ -18,10 +18,15 @@ jobs:
       - name: Syntax check runtime changes
         run: |
           node --check services/drvowa/baileysProvider.js
+          node --check services/drvowa/labelSyncDelivery.js
+          node --check services/transport/baileys/labelSync.js
+          node --check services/transport/baileys/baileysTransport.js
           node --check packages/baileys-v7-worker/src/worker.js
           node --check packages/baileys-v7-worker/src/saasDeliver.js
           node --check packages/baileys-v7-worker/src/mirrorSync.js
           node --check packages/baileys-v7-worker/src/durableMirrorSpool.js
+      - name: Label event durability and identity safety
+        run: node --test tests/label-sync.node.test.cjs
       - name: Durable capture crash/retry regression
         run: node --test tests/reliability-spool.node.test.cjs
       - name: Install Baileys v7 worker dependencies
