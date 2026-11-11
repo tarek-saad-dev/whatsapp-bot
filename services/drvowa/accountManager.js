@@ -181,12 +181,14 @@ function createWhatsAppAccountManager({
           return { ...status, runtimeEngine: engine };
         }
         if (status.state === CONNECTION_STATES.STARTING
-          || status.state === CONNECTION_STATES.CONNECTING
-          || status.state === CONNECTION_STATES.QR_REQUIRED) {
+          || ((status.state === CONNECTION_STATES.CONNECTING
+            || status.state === CONNECTION_STATES.QR_REQUIRED)
+            && (!options.rePair || status.qrAvailable))) {
           return { ...status, runtimeEngine: engine };
         }
-        // DISCONNECTED must attempt a fresh socket, not acknowledge with a
-        // stale 200 response. Provider.start() safely tears down old listeners.
+        // An explicit retry of a stale CONNECTING or QR_REQUIRED-without-QR
+        // state must also attempt a new socket. Never cycle a valid QR token.
+        // DISCONNECTED must restart instead of acknowledging stale HTTP 200.
         const started = await existing.provider.start();
         if (started.state === CONNECTION_STATES.LOGGED_OUT) {
           if (options.rePair) return beginFreshPair(key, engine, existing.provider);
