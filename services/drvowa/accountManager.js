@@ -6,6 +6,7 @@ const { validateAccountKey } = require('./accountKey');
 const { createBaileysProvider } = require('./baileysProvider');
 const { createV7WorkerProvider } = require('./v7/v7WorkerProvider');
 const { CONNECTION_STATES } = require('./connectionStates');
+const { clearLoggedOutAuth } = require('./baileysAuthReset');
 const {
   createManagedAccountRegistry,
   DESIRED_RUNNING,
@@ -40,10 +41,13 @@ function createWhatsAppAccountManager({
   authBaseDirV7 = getManagedAuthBaseDirV7(),
   sendQueueMax = getSendQueueMax(),
   registry = createManagedAccountRegistry(),
+  resetLoggedOutAuth = clearLoggedOutAuth,
   logger = console,
 } = {}) {
   /** @type {Map<string, { provider: any, queue: any, runtimeEngine: string }>} */
   const accounts = new Map();
+  // Coalesce concurrent start requests for the same account.
+  const starts = new Map();
 
   function assertEnabled() {
     if (!enabled()) {
@@ -133,7 +137,21 @@ function createWhatsAppAccountManager({
     return entry;
   }
 
-  async function start(accountKey, options = {}) {
+  async function beginFreshPair(key, engine, provider) {
+    await provider.stop();
+    const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
+    resetLoggedOutAuth(path.join(base, key));
+    accounts.delete(key);
+    // The previous provider's onLoggedOut hook may have marked the registry
+    // STOPPED. Restore RUNNING so a newly paired account survives reboots.
+    persistDesired(key, DESIRED_RUNNING, engine);
+    const fresh = getOrCreate(key, engine);
+    const started = await fresh.provider.start();
+    if (started.state === CONNECTION_STATES.LOGGED_OUT) markLoggedOutStopped(key);
+    return { ...started, runtimeEngine: engine };
+  }
+
+  async function startOnce(accountKey, options = {}) {
     assertEnabled();
     const key = requireValidKey(accountKey);
     const engine = resolveEngine(key, options.runtimeEngine);
@@ -151,29 +169,54 @@ function createWhatsAppAccountManager({
       }
       const status = existing.provider.getStatus();
       if (status.state === CONNECTION_STATES.LOGGED_OUT) {
-        markLoggedOutStopped(key);
-        return { ...status, runtimeEngine: engine };
+        // A logged-out session must never be wiped by boot recovery. Re-pair
+        // only when explicitly requested through the authenticated connect UI.
+        if (!options.rePair) {
+          markLoggedOutStopped(key);
+          return { ...status, runtimeEngine: engine };
+        }
+        return beginFreshPair(key, engine, existing.provider);
+      } else {
+        if (status.state === CONNECTION_STATES.READY || status.ready) {
+          return { ...status, runtimeEngine: engine };
+        }
+        if (status.state === CONNECTION_STATES.STARTING
+          || ((status.state === CONNECTION_STATES.CONNECTING
+            || status.state === CONNECTION_STATES.QR_REQUIRED)
+            && (!options.rePair || status.qrAvailable))) {
+          return { ...status, runtimeEngine: engine };
+        }
+        // An explicit retry of a stale CONNECTING or QR_REQUIRED-without-QR
+        // state must also attempt a new socket. Never cycle a valid QR token.
+        // DISCONNECTED must restart instead of acknowledging stale HTTP 200.
+        const started = await existing.provider.start();
+        if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+          if (options.rePair) return beginFreshPair(key, engine, existing.provider);
+          markLoggedOutStopped(key);
+        }
+        return { ...started, runtimeEngine: engine };
       }
-      if (status.state === CONNECTION_STATES.READY || status.ready) {
-        return { ...status, runtimeEngine: engine };
-      }
-      if (status.state !== CONNECTION_STATES.STOPPED
-        && status.state !== CONNECTION_STATES.ERROR) {
-        return { ...status, runtimeEngine: engine };
-      }
-      const started = await existing.provider.start();
-      if (started.state === CONNECTION_STATES.LOGGED_OUT) {
-        markLoggedOutStopped(key);
-      }
-      return { ...started, runtimeEngine: engine };
     }
 
     const entry = getOrCreate(key, engine);
     const started = await entry.provider.start();
     if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+      if (options.rePair) return beginFreshPair(key, engine, entry.provider);
       markLoggedOutStopped(key);
     }
     return { ...started, runtimeEngine: engine };
+  }
+
+  async function start(accountKey, options = {}) {
+    const key = requireValidKey(accountKey);
+    if (starts.has(key)) return starts.get(key);
+    const attempt = startOnce(key, options);
+    starts.set(key, attempt);
+    try {
+      return await attempt;
+    } finally {
+      if (starts.get(key) === attempt) starts.delete(key);
+    }
   }
 
   async function stop(accountKey) {

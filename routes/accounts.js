@@ -48,7 +48,8 @@ router.post('/:accountKey/start', async (req, res) => {
     const runtimeEngine = req.body && req.body.runtimeEngine === 'BAILEYS_V7'
       ? 'BAILEYS_V7'
       : (req.body && req.body.runtimeEngine === 'BAILEYS_V6' ? 'BAILEYS_V6' : undefined);
-    const status = await getWhatsAppAccountManager().start(accountKey, { runtimeEngine });
+    const rePair = req.body && req.body.rePair === true;
+    const status = await getWhatsAppAccountManager().start(accountKey, { runtimeEngine, rePair });
     return res.status(200).json({ success: true, status });
   } catch (err) {
     const status = err.status || 500;
