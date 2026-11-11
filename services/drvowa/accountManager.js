@@ -137,6 +137,17 @@ function createWhatsAppAccountManager({
     return entry;
   }
 
+  async function beginFreshPair(key, engine, provider) {
+    await provider.stop();
+    const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
+    resetLoggedOutAuth(path.join(base, key));
+    accounts.delete(key);
+    const fresh = getOrCreate(key, engine);
+    const started = await fresh.provider.start();
+    if (started.state === CONNECTION_STATES.LOGGED_OUT) markLoggedOutStopped(key);
+    return { ...started, runtimeEngine: engine };
+  }
+
   async function startOnce(accountKey, options = {}) {
     assertEnabled();
     const key = requireValidKey(accountKey);
@@ -161,10 +172,7 @@ function createWhatsAppAccountManager({
           markLoggedOutStopped(key);
           return { ...status, runtimeEngine: engine };
         }
-        await existing.provider.stop();
-        const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
-        resetLoggedOutAuth(path.join(base, key));
-        accounts.delete(key);
+        return beginFreshPair(key, engine, existing.provider);
       } else {
         if (status.state === CONNECTION_STATES.READY || status.ready) {
           return { ...status, runtimeEngine: engine };
@@ -178,6 +186,7 @@ function createWhatsAppAccountManager({
         // stale 200 response. Provider.start() safely tears down old listeners.
         const started = await existing.provider.start();
         if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+          if (options.rePair) return beginFreshPair(key, engine, existing.provider);
           markLoggedOutStopped(key);
         }
         return { ...started, runtimeEngine: engine };
@@ -187,6 +196,7 @@ function createWhatsAppAccountManager({
     const entry = getOrCreate(key, engine);
     const started = await entry.provider.start();
     if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+      if (options.rePair) return beginFreshPair(key, engine, entry.provider);
       markLoggedOutStopped(key);
     }
     return { ...started, runtimeEngine: engine };
