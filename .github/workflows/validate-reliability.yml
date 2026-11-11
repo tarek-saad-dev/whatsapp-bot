@@ -40,3 +40,49 @@ jobs:
         run: npm --prefix packages/baileys-v7-worker ci --ignore-scripts
       - name: History and media sync regression tests
         run: npm --prefix packages/baileys-v7-worker test
+
+  production-smoke:
+    name: Verify merged WhatsApp and DRVO app deployments (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Read-only VPS commit and service health check
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: 187.77.83.120
+        run: |
+          set -euo pipefail
+          test -n "${VPS_SSH_KEY:-}" || { echo "PRODUCTION_SSH_CREDENTIAL_UNAVAILABLE"; exit 1; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          ssh-keyscan -T 20 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes "root@$VPS_HOST" 'bash -se' <<'REMOTE'
+            set -euo pipefail
+            expected_bot='8f32db41a116fb8e391b9c51a86441d09a2504fd'
+            expected_app='a67eb207f4ca43d57dd9797e4bb8d8722789cd46'
+            ready=0
+            for attempt in $(seq 1 12); do
+              bot_sha="$(git -C /home/whatsapp/whatsapp-bot rev-parse HEAD 2>/dev/null || true)"
+              app_sha="$(git -C /home/drvowa/app rev-parse HEAD 2>/dev/null || true)"
+              if [ "$bot_sha" = "$expected_bot" ] && [ "$app_sha" = "$expected_app" ]; then
+                ready=1
+                break
+              fi
+              echo "Waiting for automatic production deployment (check $attempt/12)"
+              sleep 20
+            done
+            if [ "$ready" -ne 1 ]; then
+              echo "DEPLOYMENT_COMMIT_MISMATCH"
+              printf 'bot currently: %s\napp currently: %s\n' "$bot_sha" "$app_sha"
+              exit 1
+            fi
+            systemctl is-active --quiet drvowa.service || { echo "DRVO_APP_NOT_RUNNING"; exit 1; }
+            systemctl is-active --quiet drvowa-ai-worker.service || { echo "DRVO_WORKER_NOT_RUNNING"; exit 1; }
+            systemctl is-active --quiet nginx.service || { echo "NGINX_NOT_RUNNING"; exit 1; }
+            curl --fail --silent --show-error --max-time 12 'http://127.0.0.1:3100/api/health?ready=1' | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("status") == "ok" and d.get("database") == "up", "APP_OR_DATABASE_UNHEALTHY"'
+            echo "PRODUCTION_DEPLOYMENT_AND_HEALTH_VERIFIED"
+          REMOTE
