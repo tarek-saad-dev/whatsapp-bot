@@ -931,6 +931,10 @@ function createBaileysTransport({
         stopping = false;
         clearReconnectTimer();
         await teardownSocket();
+        // QR payloads belong to one socket generation only. Never serve an
+        // expired code from a disconnected/replaced socket.
+        lastQr = null;
+        qrRequired = false;
 
         const generation = ++connectGeneration;
         const { state, saveCreds } = await useAuthState(authDir);
@@ -1033,6 +1037,8 @@ function createBaileysTransport({
             }
             if (connection === 'close') {
                 ready = false;
+                qrRequired = false;
+                lastQr = null;
                 lastDisconnectAt = new Date().toISOString();
                 const err = lastDisconnect && lastDisconnect.error;
                 const statusCode = err && err.output && err.output.statusCode;
@@ -1128,6 +1134,8 @@ function createBaileysTransport({
         stopping = true;
         listening = false;
         ready = false;
+        qrRequired = false;
+        lastQr = null;
         worker.stop();
         lidPending.clear();
         decryptPending.clear();
