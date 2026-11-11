@@ -18,6 +18,9 @@ jobs:
       - name: Syntax check runtime changes
         run: |
           node --check services/drvowa/baileysProvider.js
+          node --check services/drvowa/accountManager.js
+          node --check services/drvowa/baileysAuthReset.js
+          node --check routes/accounts.js
           node --check services/drvowa/labelSyncDelivery.js
           node --check services/transport/baileys/labelSync.js
           node --check services/transport/baileys/baileysTransport.js
@@ -29,6 +32,10 @@ jobs:
         run: node --test tests/label-sync.node.test.cjs
       - name: Durable capture crash/retry regression
         run: node --test tests/reliability-spool.node.test.cjs
+      - name: Install runtime dependencies
+        run: npm ci --ignore-scripts
+      - name: WhatsApp reconnect and re-pair regression tests
+        run: npx vitest run tests/unit/account-reconnect.test.js
       - name: Install Baileys v7 worker dependencies
         run: npm --prefix packages/baileys-v7-worker ci --ignore-scripts
       - name: History and media sync regression tests
