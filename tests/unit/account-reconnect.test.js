@@ -75,9 +75,13 @@ describe('managed account reconnection', () => {
       start: vi.fn(async () => ({ state: 'QR_REQUIRED', ready: false })),
       stop: vi.fn(),
     };
-    const { manager, resetLoggedOutAuth } = setup(vi.fn().mockReturnValueOnce(old).mockReturnValueOnce(fresh));
+    const { manager, registry, resetLoggedOutAuth } = setup(vi.fn().mockReturnValueOnce(old).mockReturnValueOnce(fresh));
     expect((await manager.start('salon-3', { rePair: true })).state).toBe('QR_REQUIRED');
     expect(resetLoggedOutAuth).toHaveBeenCalledTimes(1);
+    // The old provider's logout hook may have set STOPPED just before reset.
+    expect(registry.setDesiredState).toHaveBeenLastCalledWith(
+      'salon-3', 'RUNNING', { runtimeEngine: 'BAILEYS_V6' },
+    );
   });
 
   it('coalesces overlapping start requests per account', async () => {
