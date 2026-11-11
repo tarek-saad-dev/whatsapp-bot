@@ -142,6 +142,9 @@ function createWhatsAppAccountManager({
     const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
     resetLoggedOutAuth(path.join(base, key));
     accounts.delete(key);
+    // The previous provider's onLoggedOut hook may have marked the registry
+    // STOPPED. Restore RUNNING so a newly paired account survives reboots.
+    persistDesired(key, DESIRED_RUNNING, engine);
     const fresh = getOrCreate(key, engine);
     const started = await fresh.provider.start();
     if (started.state === CONNECTION_STATES.LOGGED_OUT) markLoggedOutStopped(key);
