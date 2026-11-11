@@ -6,6 +6,7 @@ const { validateAccountKey } = require('./accountKey');
 const { createBaileysProvider } = require('./baileysProvider');
 const { createV7WorkerProvider } = require('./v7/v7WorkerProvider');
 const { CONNECTION_STATES } = require('./connectionStates');
+const { clearLoggedOutAuth } = require('./baileysAuthReset');
 const {
   createManagedAccountRegistry,
   DESIRED_RUNNING,
@@ -40,10 +41,13 @@ function createWhatsAppAccountManager({
   authBaseDirV7 = getManagedAuthBaseDirV7(),
   sendQueueMax = getSendQueueMax(),
   registry = createManagedAccountRegistry(),
+  resetLoggedOutAuth = clearLoggedOutAuth,
   logger = console,
 } = {}) {
   /** @type {Map<string, { provider: any, queue: any, runtimeEngine: string }>} */
   const accounts = new Map();
+  // Coalesce concurrent start requests for the same account.
+  const starts = new Map();
 
   function assertEnabled() {
     if (!enabled()) {
@@ -133,7 +137,7 @@ function createWhatsAppAccountManager({
     return entry;
   }
 
-  async function start(accountKey, options = {}) {
+  async function startOnce(accountKey, options = {}) {
     assertEnabled();
     const key = requireValidKey(accountKey);
     const engine = resolveEngine(key, options.runtimeEngine);
@@ -151,21 +155,33 @@ function createWhatsAppAccountManager({
       }
       const status = existing.provider.getStatus();
       if (status.state === CONNECTION_STATES.LOGGED_OUT) {
-        markLoggedOutStopped(key);
-        return { ...status, runtimeEngine: engine };
+        // A logged-out session must never be wiped by boot recovery. Re-pair
+        // only when explicitly requested through the authenticated connect UI.
+        if (!options.rePair) {
+          markLoggedOutStopped(key);
+          return { ...status, runtimeEngine: engine };
+        }
+        await existing.provider.stop();
+        const base = engine === RUNTIME_ENGINE_V7 ? authBaseDirV7 : authBaseDir;
+        resetLoggedOutAuth(path.join(base, key));
+        accounts.delete(key);
+      } else {
+        if (status.state === CONNECTION_STATES.READY || status.ready) {
+          return { ...status, runtimeEngine: engine };
+        }
+        if (status.state === CONNECTION_STATES.STARTING
+          || status.state === CONNECTION_STATES.CONNECTING
+          || status.state === CONNECTION_STATES.QR_REQUIRED) {
+          return { ...status, runtimeEngine: engine };
+        }
+        // DISCONNECTED must attempt a fresh socket, not acknowledge with a
+        // stale 200 response. Provider.start() safely tears down old listeners.
+        const started = await existing.provider.start();
+        if (started.state === CONNECTION_STATES.LOGGED_OUT) {
+          markLoggedOutStopped(key);
+        }
+        return { ...started, runtimeEngine: engine };
       }
-      if (status.state === CONNECTION_STATES.READY || status.ready) {
-        return { ...status, runtimeEngine: engine };
-      }
-      if (status.state !== CONNECTION_STATES.STOPPED
-        && status.state !== CONNECTION_STATES.ERROR) {
-        return { ...status, runtimeEngine: engine };
-      }
-      const started = await existing.provider.start();
-      if (started.state === CONNECTION_STATES.LOGGED_OUT) {
-        markLoggedOutStopped(key);
-      }
-      return { ...started, runtimeEngine: engine };
     }
 
     const entry = getOrCreate(key, engine);
@@ -174,6 +190,18 @@ function createWhatsAppAccountManager({
       markLoggedOutStopped(key);
     }
     return { ...started, runtimeEngine: engine };
+  }
+
+  async function start(accountKey, options = {}) {
+    const key = requireValidKey(accountKey);
+    if (starts.has(key)) return starts.get(key);
+    const attempt = startOnce(key, options);
+    starts.set(key, attempt);
+    try {
+      return await attempt;
+    } finally {
+      if (starts.get(key) === attempt) starts.delete(key);
+    }
   }
 
   async function stop(accountKey) {
