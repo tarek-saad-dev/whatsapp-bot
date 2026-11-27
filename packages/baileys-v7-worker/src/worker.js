@@ -738,9 +738,6 @@ function enqueueSend(fn) {
 }
 
 async function handleSend({ phone, message, idempotencyKey }) {
-  if (!(await contactAllowed(normalizePhoneDigits(phone)))) {
-    return { success: false, status: 'failed', error: 'Privacy policy blocks destination or is unavailable', code: 'PRIVATE_CONTACT_OR_POLICY_UNAVAILABLE', httpStatus: 403 };
-  }
   if (snapshot.state !== 'READY' || !sock) {
     return {
       success: false,
@@ -772,6 +769,12 @@ async function handleSend({ phone, message, idempotencyKey }) {
   }
 
   return enqueueSend(async () => {
+    // The queued send may have waited while owner changed privacy settings.
+    // Re-fetch immediately before dispatch; no cached policy authorizes sending.
+    await historyPrivacy.get({ force: true });
+    if (!historyPrivacy.contactAllowed(digits)) {
+      return { success: false, status: 'failed', error: 'Privacy policy blocks destination or is unavailable', code: 'PRIVATE_CONTACT_OR_POLICY_UNAVAILABLE', httpStatus: 403 };
+    }
     const jid = `${digits}@s.whatsapp.net`;
     const sendingSocket = sock;
     const sendingConnectedAt = snapshot.lastConnectedAt;

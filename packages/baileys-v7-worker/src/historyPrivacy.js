@@ -9,9 +9,12 @@ export function createHistoryPrivacyPolicy({
   let approvedPhones = null;
   let expiresAt = 0;
   let inFlight = null;
+  function valid() {
+    return now() < expiresAt && privatePhones !== null && mode !== null && approvedPhones !== null && state !== 'unknown';
+  }
   function current() {
-    if (!enabled) return 'fresh';
-    return now() < expiresAt ? state : 'unknown';
+    if (!valid()) return 'unknown';
+    return enabled ? state : 'fresh';
   }
   async function get({ force = false } = {}) {
     if (!token || !accountKey) return 'unknown';
@@ -47,20 +50,19 @@ export function createHistoryPrivacyPolicy({
     try { return await inFlight; } finally { inFlight = null; }
   }
   function contactAllowed(key) {
-    if (now() >= expiresAt || privatePhones === null || mode === null || approvedPhones === null) return false;
+    if (!valid()) return false;
     if (!privatePhones.length && mode !== 'BUSINESS_ONLY') return true;
     const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
     return Boolean(match && !privatePhones.includes(match[1]) &&
       (mode !== 'BUSINESS_ONLY' || approvedPhones.includes(match[1])));
   }
   function metadataAllowed() {
-    return now() < expiresAt && privatePhones !== null && privatePhones.length === 0 &&
-      mode !== null && mode !== 'BUSINESS_ONLY' && approvedPhones !== null;
+    return valid() && privatePhones.length === 0 && mode !== 'BUSINESS_ONLY';
   }
   // Do not treat an outage, unresolved identity or unapproved business-only
   // contact as consent to erase a queue. Only an explicit block qualifies.
   function explicitlyBlocked(key) {
-    if (now() >= expiresAt || privatePhones === null || mode === null || approvedPhones === null) return false;
+    if (!valid()) return false;
     const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
     return Boolean(match && privatePhones.includes(match[1]));
   }

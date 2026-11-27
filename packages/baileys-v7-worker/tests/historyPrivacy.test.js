@@ -75,3 +75,11 @@ test('business-only capture requires explicit approval and private exclusion win
  assert.equal(policy.contactAllowed('201001234569'),true);
  assert.equal(policy.contactAllowed('201001234567'),false);
 });
+
+test('invalid policy cannot authorize contact or historical capture', async () => {
+ const policy = createHistoryPrivacyPolicy({accountKey:'a',token:'test',baseUrl:'http://localhost',
+ fetchFn: async()=>({ok:true,json:async()=>({historyImportEnabled:true,privateContactPhones:[],mode:'INVALID',approvedContactPhones:[]})})});
+ assert.equal(await policy.get(),'unknown');
+ assert.equal(policy.contactAllowed('201001234567'),false);
+ assert.equal(policy.metadataAllowed(),false);
+});

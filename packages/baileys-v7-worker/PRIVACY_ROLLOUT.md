@@ -7,3 +7,5 @@ Operation modes: BUSINESS_ONLY restricts worker capture/send to explicitly appro
 
 ## Explicit block spool cleanup (disabled by default)
 V7_PRIVACY_SPOOL_PURGE_ENABLED=true enables atomic journal rewrites removing pending and delivered records for positively identified explicitly blocked phones, including media file removal by derived path. Unknown policy, unresolved numbers and business-only unapproved numbers are not purge instructions. Auth state, legacy media with no contactKey, receipt/retry memory, supervisor outbound spool, temporary files left by crashes, filesystem backups and V6 are not erased by this change. Enable only after E2E and operator review; no production cleanup performed.
+
+Release hardening: queued sends fetch current policy after queue wait and before dispatch; malformed mode or consent cannot authorize history or contacts. This narrows but does not eliminate the post-check send race. Policy outages fail closed; staging must explicitly test recovery and availability, including OTP and owner notifications under business-only. No deployment.
