@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { normalizeMirrorChat, normalizeMirrorMessage } from './mirrorSync.js';
 import { normalizeLabelEdit, normalizeLabelAssociation } from './labelSync.js';
 import { createDurableMirrorSpool } from './durableMirrorSpool.js';
+import { createHistoryPrivacyPolicy, allowsMirrorEvent, allowsMediaEvent } from './historyPrivacy.js';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -44,6 +45,12 @@ const logger = pino({ level: process.env.V7_WORKER_LOG_LEVEL || 'warn' });
 const ACCOUNT_KEY = String(process.env.V7_ACCOUNT_KEY || '').trim();
 const AUTH_DIR = String(process.env.V7_AUTH_DIR || '').trim();
 const S2S_ENABLED = String(process.env.V7_S2S_ENABLED || 'true').toLowerCase() !== 'false';
+const historyPrivacy = createHistoryPrivacyPolicy({
+  accountKey: ACCOUNT_KEY,
+  baseUrl: process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100',
+  token: S2S_ENABLED ? process.env.DRVOWA_RUNTIME_TOKEN : '',
+  enabled: process.env.V7_HISTORY_SYNC_ENABLED !== 'false',
+});
 
 if (!ACCOUNT_KEY || !AUTH_DIR) {
   // eslint-disable-next-line no-console
@@ -310,6 +317,7 @@ async function reportInboundReceipts() {
 }
 
 function mirrorQueue(event) {
+  if (!allowsMirrorEvent(event, historyPrivacy.current())) return;
   // No AI decisions here. The SaaS /sync endpoint is observational-only.
   // Historical provider IDs are identical to live IDs, avoiding duplicate rows.
   const identity = event.kind === 'message'
@@ -325,6 +333,7 @@ function localLidToPn(lid) {
 }
 
 async function mirrorMessage(msg, historical) {
+  if (historical && await historyPrivacy.get() !== 'allow') return;
   const event = await normalizeMirrorMessage(msg, {
     resolveLidPn: localLidToPn,
     ownDigits: ownAccountDigits(),
@@ -342,17 +351,20 @@ async function mirrorMessage(msg, historical) {
 }
 
 async function mirrorChat(chat) {
+  if (await historyPrivacy.get() !== 'allow') return;
   const event = await normalizeMirrorChat(chat, { resolveLidPn: localLidToPn });
   if (event) mirrorQueue(event);
 }
 
 async function cacheMedia(msg, event) {
+  if (!allowsMirrorEvent(event, event.historical ? await historyPrivacy.get() : historyPrivacy.current())) return;
   if (event.fileSize && event.fileSize > MAX_MEDIA_BYTES) return;
   const id = 'media:' + event.providerMessageId;
   if (mediaSpool.hasProviderMessageId(id)) return;
   const downloaded = await downloadMediaMessage(msg, 'buffer', {}, {
     logger, reuploadRequest: sock?.updateMediaMessage?.bind(sock),
   });
+  if (!allowsMirrorEvent(event, event.historical ? await historyPrivacy.get() : historyPrivacy.current())) return;
   const bytes = Buffer.from(downloaded);
   if (!bytes.length || bytes.length>MAX_MEDIA_BYTES) return;
   const key = createHash('sha256').update(id).digest('hex');
@@ -366,6 +378,7 @@ async function cacheMedia(msg, event) {
       filePath: dest, messageId: event.providerMessageId,
       mimeType: String(event.mimeType || 'application/octet-stream').split(';')[0].trim(),
       fileName: event.fileName || '',
+      historical: event.historical,
     },
   });
   void flushMediaSpool();
@@ -373,13 +386,16 @@ async function cacheMedia(msg, event) {
 
 async function flushMediaSpool() {
   if (mediaBusy || stopping || !S2S_ENABLED || !process.env.DRVOWA_RUNTIME_TOKEN) return;
-  const pending = mediaSpool.getPendingForDelivery().slice(0, 6);
-  if (!pending.length) return;
   mediaBusy = true;
   try {
+    const policy = await historyPrivacy.get();
+    const pending = mediaSpool.getPendingForDelivery()
+      .filter(row => allowsMediaEvent(row.normalizedEvent.payload, policy)).slice(0, 6);
+    if (!pending.length) return;
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (const row of pending) {
       const m = row.normalizedEvent.payload;
+      if (!allowsMediaEvent(m, historyPrivacy.current())) continue;
       let success = false;
       let code = 'MEDIA_NETWORK';
       try {
@@ -416,13 +432,16 @@ async function flushMediaSpool() {
 
 async function flushMirrorSpool() {
   if (mirrorBusy || stopping || !S2S_ENABLED || !process.env.DRVOWA_RUNTIME_TOKEN) return;
-  const pending = mirrorSpool.getPendingForDelivery().slice(0, 24);
-  if (!pending.length) return;
   mirrorBusy = true;
   try {
+    const policy = await historyPrivacy.get();
+    const pending = mirrorSpool.getPendingForDelivery()
+      .filter(row => allowsMirrorEvent(row.normalizedEvent.payload, policy)).slice(0, 24);
+    if (!pending.length) return;
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (let i = 0; i < pending.length; i += 6) {
-      const batch = pending.slice(i, i + 6);
+      const batch = pending.slice(i, i + 6).filter(item => allowsMirrorEvent(item.normalizedEvent.payload, historyPrivacy.current()));
+      if (!batch.length) continue;
       let okay = false;
       let errorCode = 'NETWORK';
       try {
@@ -462,6 +481,7 @@ async function flushMirrorSpool() {
 }
 
 function scheduleMirrorMessage(msg, historical) {
+  if (historical && historyPrivacy.current() !== 'allow') return;
   historyChain = historyChain.then(() => mirrorMessage(msg, historical)).catch(err => {
     mirrorErrors++;
     console.error('[v7-sync] message_capture_failed', String(err?.name || 'SYNC_ERROR'));
@@ -469,6 +489,7 @@ function scheduleMirrorMessage(msg, historical) {
 }
 
 function scheduleMirrorChat(chat) {
+  if (historyPrivacy.current() !== 'allow') return;
   historyChain = historyChain.then(() => mirrorChat(chat)).catch(err => {
     mirrorErrors++;
     console.error('[v7-sync] chat_capture_failed', String(err?.name || 'SYNC_ERROR'));
@@ -476,6 +497,7 @@ function scheduleMirrorChat(chat) {
 }
 
 function scheduleLabelEdit(label) {
+  if (historyPrivacy.current() !== 'allow') return;
   // All events go through the same crash-safe delivery spool as mirror history.
   historyChain = historyChain.then(() => {
     const normalized = normalizeLabelEdit(label);
@@ -489,6 +511,7 @@ function scheduleLabelEdit(label) {
 }
 
 function scheduleLabelAssociation(payload) {
+  if (historyPrivacy.current() !== 'allow') return;
   historyChain = historyChain.then(async () => {
     const normalized = await normalizeLabelAssociation(payload, { resolveLidPn: localLidToPn });
     if (!normalized) { labelEventsSkipped++; return; }
@@ -501,6 +524,7 @@ function scheduleLabelAssociation(payload) {
 }
 
 function onHistorySet(data) {
+  if (historyPrivacy.current() !== 'allow') return;
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const chats = Array.isArray(data?.chats) ? data.chats : [];
   const contacts = Array.isArray(data?.contacts) ? data.contacts : [];
@@ -516,6 +540,11 @@ function onMessagesUpsert(upsert) {
   const type = upsert?.type || 'unknown';
   const messages = Array.isArray(upsert?.messages) ? upsert.messages : [];
   for (const msg of messages) {
+    // Non-notify events never enter the live inbound/outbound paths.
+    if (type !== 'notify') {
+      scheduleMirrorMessage(msg, true);
+      continue;
+    }
     const key = msg?.key || {};
     const summary = summarizeInbound(msg);
     summary.upsertType = type;
@@ -578,6 +607,7 @@ async function startSocket() {
     version = undefined;
   }
 
+  await historyPrivacy.get({ force: true });
   sock = makeWASocket({
     version,
     auth: {
@@ -586,7 +616,8 @@ async function startSocket() {
     },
     logger,
     browser: Browsers.ubuntu('DRVOWA-Baileys-V7'),
-    syncFullHistory: process.env.V7_HISTORY_SYNC_ENABLED !== 'false',
+    syncFullHistory: historyPrivacy.current() === 'allow',
+    shouldSyncHistoryMessage: () => historyPrivacy.current() === 'allow',
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
     getMessage: (key) => pendingRetry.getMessage(key),
