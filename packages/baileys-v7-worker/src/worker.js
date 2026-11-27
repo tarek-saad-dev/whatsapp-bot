@@ -31,6 +31,7 @@ import { createCryptoHealth } from './cryptoHealth.js';
 import { createRetryStore } from './retryStore.js';
 import { createDeliveryEvidence } from './deliveryEvidence.js';
 import { createPeerCryptoHealth } from './peerCryptoHealth.js';
+import { createReconnectPolicy } from './reconnectPolicy.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -67,6 +68,8 @@ const cryptoHealth = createCryptoHealth();
 const retryStore = createRetryStore();
 const deliveryEvidence = createDeliveryEvidence();
 const peerCryptoHealth = createPeerCryptoHealth();
+const reconnectPolicy = createReconnectPolicy();
+let reconnectTimer = null;
 const retrySweepTimer = setInterval(() => retryStore.sweep(), 15_000);
 retrySweepTimer.unref();
 let deliveryBusy = false;
@@ -126,7 +129,8 @@ function getStatus() {
     lastDisconnectAt: snapshot.lastDisconnectAt,
     lastDisconnectCode: snapshot.lastDisconnectCode,
     lastErrorCode: snapshot.lastErrorCode,
-    reconnectAttempts: snapshot.reconnectAttempts,
+    reconnectAttempts: reconnectPolicy.snapshot().attempts,
+    socketRecovery: reconnectPolicy.snapshot(),
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
     outboundRetry: retryStore.stats(),
@@ -578,9 +582,10 @@ async function startSocket() {
   });
 
   const currentSocket = sock;
+  let closed = false;
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async (update) => {
-    if (sock !== currentSocket || stopping) return;
+    if (sock !== currentSocket || stopping || closed) return;
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       try {
@@ -590,11 +595,14 @@ async function startSocket() {
         setState(snapshot.state === 'QR_REQUIRED' ? 'QR_REQUIRED' : 'ERROR');
       }
     }
+    if (sock !== currentSocket || stopping || closed) return;
     if (connection === 'open') {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectPolicy.opened();
+      snapshot.lastErrorCode = null;
       snapshot.qr = null;
       snapshot.qrAvailable = false;
       snapshot.lastConnectedAt = new Date().toISOString();
-      snapshot.reconnectAttempts = 0;
       setState('READY');
     } else if (connection === 'connecting') {
       if (snapshot.state !== 'QR_REQUIRED') setState('CONNECTING');
@@ -602,6 +610,8 @@ async function startSocket() {
       const statusCode = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output?.statusCode
         : lastDisconnect?.error?.output?.statusCode;
+      closed = true;
+      const decision = reconnectPolicy.closed(statusCode);
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       snapshot.ready = false;
       snapshot.qrAvailable = false;
@@ -612,25 +622,33 @@ async function startSocket() {
         setState('LOGGED_OUT');
         return;
       }
-      snapshot.reconnectAttempts += 1;
+      if (decision.action !== 'RETRY_SCHEDULED') {
+        snapshot.lastErrorCode = decision.action;
+        setState('ERROR');
+        return;
+      }
       setState('DISCONNECTED');
-      if (!stopping && snapshot.reconnectAttempts < 20) {
-        setTimeout(() => {
-          startSocket().catch((e) => {
+      if (!stopping && !reconnectTimer) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (stopping || sock !== currentSocket || snapshot.state !== 'DISCONNECTED') return;
+          setState('CONNECTING');
+          startSocket().catch(() => {
+            if (stopping) return;
+            reconnectPolicy.startFailed();
             snapshot.lastErrorCode = 'RECONNECT_FAILED';
             setState('ERROR');
-            // eslint-disable-next-line no-console
-            console.error('[v7-worker] reconnect_failed', String(e?.message || e).slice(0, 120));
+            console.error('[v7-worker] reconnect_failed');
           });
-        }, Math.min(30_000, 1000 * snapshot.reconnectAttempts));
+        }, decision.delayMs);
       }
     }
   });
   sock.ev.on('messages.upsert', (update) => {
-    if (sock === currentSocket && !stopping) onMessagesUpsert(update);
+    if (sock === currentSocket && !stopping && !closed) onMessagesUpsert(update);
   });
   sock.ev.on('messages.update', (updates) => {
-    if (sock !== currentSocket || stopping) return;
+    if (sock !== currentSocket || stopping || closed) return;
     let changed = false;
     for (const item of Array.isArray(updates) ? updates : []) {
       if (deliveryEvidence.recordUpdate(item?.key, item?.update?.status)) changed = true;
@@ -723,6 +741,8 @@ async function handleSend({ phone, message, idempotencyKey }) {
 
 async function shutdown() {
   stopping = true;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectPolicy.stopped();
   clearInterval(retrySweepTimer);
   retryStore.clear();
   if (inboundTimer) clearInterval(inboundTimer);
