@@ -208,7 +208,7 @@ async function maybeObserveOutbound(msg) {
     resolveLidPn,
     ownDigits: ownAccountDigits(),
   });
-  if (built.ok && !(await contactAllowed(built.observation.phone))) return;
+  if (built.ok && (!(await contactAllowed(built.observation.phone)) || historyPrivacy.beforeReset(built.observation.occurredAt))) return;
   if (!built.ok) {
     // eslint-disable-next-line no-console
     console.log('[v7-worker-outbound] skip', JSON.stringify({ reason: built.reason }));
@@ -252,7 +252,7 @@ async function maybeDeliver(msg, upsertType) {
     upsertType,
     resolveLidPn,
   });
-  if (!built.ok || !(await contactAllowed(built.dto.externalContactKey))) return;
+  if (!built.ok || !(await contactAllowed(built.dto.externalContactKey)) || historyPrivacy.beforeReset(built.dto.messageTimestamp || built.dto.receivedAt)) return;
   // Commit before network IO. A crash or network failure cannot lose a plaintext
   // captured message; retries use the same providerMessageId / SaaS dedup key.
   inboundSpool.capture(built.dto, { drvowaDto: built.dto });
@@ -264,11 +264,15 @@ async function flushInboundSpool() {
   deliveryBusy = true;
   try {
     await historyPrivacy.get();
-    if (PRIVACY_SPOOL_PURGE_ENABLED) inboundSpool.purgeMatching(item =>
-      historyPrivacy.explicitlyBlocked((item.drvowaDto || item.normalizedEvent)?.externalContactKey));
+    inboundSpool.purgeMatching(item => {
+      const dto=item.drvowaDto || item.normalizedEvent;
+      return historyPrivacy.beforeReset(dto?.messageTimestamp || dto?.receivedAt) ||
+        (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyBlocked(dto?.externalContactKey));
+    });
     for (const item of inboundSpool.getPendingForDelivery().filter(item =>
       historyPrivacy.contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey)).slice(0, 40)) {
-      if (!(await contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey))) continue;
+      const dto=item.drvowaDto || item.normalizedEvent;
+      if (!(await contactAllowed(dto?.externalContactKey)) || historyPrivacy.beforeReset(dto?.messageTimestamp || dto?.receivedAt)) continue;
       const outcome = await deliverer.deliver(item.drvowaDto || item.normalizedEvent);
       if (outcome.ok) {
         inboundSpool.markDelivered(item.providerMessageId);
@@ -331,7 +335,7 @@ function eventContactAllowed(event) {
   return event?.kind === 'label' ? historyPrivacy.metadataAllowed() : historyPrivacy.contactAllowed(event?.contactKey);
 }
 function mirrorQueue(event) {
-  if (!allowsMirrorEvent(event, historyPrivacy.current()) || !eventContactAllowed(event)) return;
+  if (!allowsMirrorEvent(event, historyPrivacy.current()) || !eventContactAllowed(event) || historyPrivacy.beforeReset(event.occurredAt,event.kind !== 'message' || event.historical)) return;
   // No AI decisions here. The SaaS /sync endpoint is observational-only.
   // Historical provider IDs are identical to live IDs, avoiding duplicate rows.
   const identity = event.kind === 'message'
@@ -371,14 +375,14 @@ async function mirrorChat(chat) {
 }
 
 async function cacheMedia(msg, event) {
-  if (!(await contactAllowed(event.contactKey)) || !allowsMirrorEvent(event, historyPrivacy.current())) return;
+  if (!(await contactAllowed(event.contactKey)) || !allowsMirrorEvent(event, historyPrivacy.current()) || historyPrivacy.beforeReset(event.occurredAt,event.historical)) return;
   if (event.fileSize && event.fileSize > MAX_MEDIA_BYTES) return;
   const id = 'media:' + event.providerMessageId;
   if (mediaSpool.hasProviderMessageId(id)) return;
   const downloaded = await downloadMediaMessage(msg, 'buffer', {}, {
     logger, reuploadRequest: sock?.updateMediaMessage?.bind(sock),
   });
-  if (!(await contactAllowed(event.contactKey)) || !allowsMirrorEvent(event, historyPrivacy.current())) return;
+  if (!(await contactAllowed(event.contactKey)) || !allowsMirrorEvent(event, historyPrivacy.current()) || historyPrivacy.beforeReset(event.occurredAt,event.historical)) return;
   const bytes = Buffer.from(downloaded);
   if (!bytes.length || bytes.length>MAX_MEDIA_BYTES) return;
   const key = createHash('sha256').update(id).digest('hex');
@@ -393,6 +397,7 @@ async function cacheMedia(msg, event) {
       mimeType: String(event.mimeType || 'application/octet-stream').split(';')[0].trim(),
       fileName: event.fileName || '',
       historical: event.historical,
+      occurredAt: event.occurredAt,
       contactKey: event.contactKey,
     },
   });
@@ -404,8 +409,8 @@ async function flushMediaSpool() {
   mediaBusy = true;
   try {
     const policy = await historyPrivacy.get();
-    if (PRIVACY_SPOOL_PURGE_ENABLED) mediaSpool.purgeMatching(row =>
-      historyPrivacy.explicitlyBlocked(row.normalizedEvent.payload?.contactKey), row => {
+    mediaSpool.purgeMatching(row =>
+      historyPrivacy.beforeReset(row.normalizedEvent.payload?.occurredAt,row.normalizedEvent.payload?.historical) || (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyBlocked(row.normalizedEvent.payload?.contactKey)), row => {
         // Derive the path from the durable ID; never delete a journal-supplied arbitrary path.
         const key = createHash('sha256').update(row.providerMessageId).digest('hex');
         const expected = path.join(MEDIA_DIR, key);
@@ -418,7 +423,7 @@ async function flushMediaSpool() {
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (const row of pending) {
       const m = row.normalizedEvent.payload;
-      if (!(await contactAllowed(m.contactKey)) || !allowsMediaEvent(m, historyPrivacy.current())) continue;
+      if (!(await contactAllowed(m.contactKey)) || !allowsMediaEvent(m, historyPrivacy.current()) || historyPrivacy.beforeReset(m.occurredAt,m.historical)) continue;
       let success = false;
       let code = 'MEDIA_NETWORK';
       try {
@@ -458,14 +463,16 @@ async function flushMirrorSpool() {
   mirrorBusy = true;
   try {
     const policy = await historyPrivacy.get();
-    if (PRIVACY_SPOOL_PURGE_ENABLED) mirrorSpool.purgeMatching(row =>
-      historyPrivacy.explicitlyBlocked(row.normalizedEvent.payload?.contactKey));
+    mirrorSpool.purgeMatching(row => {
+      const event=row.normalizedEvent.payload;
+      return historyPrivacy.beforeReset(event?.occurredAt,event?.kind !== 'message' || event?.historical) || (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyBlocked(event?.contactKey));
+    });
     const pending = mirrorSpool.getPendingForDelivery()
       .filter(row => allowsMirrorEvent(row.normalizedEvent.payload, policy) && eventContactAllowed(row.normalizedEvent.payload)).slice(0, 24);
     if (!pending.length) return;
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (let i = 0; i < pending.length; i += 6) {
-      const batch = pending.slice(i, i + 6).filter(item => allowsMirrorEvent(item.normalizedEvent.payload, historyPrivacy.current()) && eventContactAllowed(item.normalizedEvent.payload));
+      const batch = pending.slice(i, i + 6).filter(item => allowsMirrorEvent(item.normalizedEvent.payload, historyPrivacy.current()) && eventContactAllowed(item.normalizedEvent.payload) && !historyPrivacy.beforeReset(item.normalizedEvent.payload?.occurredAt,item.normalizedEvent.payload?.historical));
       if (!batch.length) continue;
       let okay = false;
       let errorCode = 'NETWORK';

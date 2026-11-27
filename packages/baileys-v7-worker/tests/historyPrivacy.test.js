@@ -83,3 +83,14 @@ test('invalid policy cannot authorize contact or historical capture', async () =
  assert.equal(policy.contactAllowed('201001234567'),false);
  assert.equal(policy.metadataAllowed(),false);
 });
+
+test('workspace reset rejects pre-cutoff events and historical metadata but accepts new live events',async()=>{
+ let clock=1;const resetAtUtc='2026-11-27T00:00:00.000Z';
+ const policy=createHistoryPrivacyPolicy({accountKey:'a',token:'test',baseUrl:'http://localhost',now:()=>clock,ttlMs:10,fetchFn:async()=>({ok:true,json:async()=>({historyImportEnabled:true,privateContactPhones:[],mode:'ALL',approvedContactPhones:[],resetAtUtc})})});
+ assert.equal(await policy.get(),'fresh');
+ assert.equal(policy.beforeReset('2026-11-26T23:59:59Z'),true);
+ assert.equal(policy.beforeReset(null),true);
+ assert.equal(policy.beforeReset('2026-11-27T00:00:01Z',true),true);
+ assert.equal(policy.beforeReset('2026-11-27T00:00:01Z'),false);
+ clock+=11;assert.equal(policy.beforeReset(null),false);assert.equal(policy.contactAllowed('201001234567'),false);
+});

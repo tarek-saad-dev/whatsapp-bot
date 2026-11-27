@@ -8,6 +8,7 @@ export function createHistoryPrivacyPolicy({
   let mode = null;
   let approvedPhones = null;
   let expiresAt = 0;
+  let resetAt = null;
   let inFlight = null;
   function valid() {
     return now() < expiresAt && privatePhones !== null && mode !== null && approvedPhones !== null && state !== 'unknown';
@@ -36,13 +37,16 @@ export function createHistoryPrivacyPolicy({
         mode = ['ALL', 'BUSINESS_ONLY', 'MANUAL'].includes(body.mode) ? body.mode : null;
         approvedPhones = Array.isArray(body.approvedContactPhones) && body.approvedContactPhones.length <= 1000 &&
           body.approvedContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p)) ? body.approvedContactPhones : null;
-        state = body.historyImportEnabled === true ? 'allow'
-          : body.historyImportEnabled === false ? 'fresh' : 'unknown';
+        resetAt = body.resetAtUtc == null ? null : Date.parse(body.resetAtUtc);
+        if (resetAt !== null && !Number.isFinite(resetAt)) throw new Error('INVALID_RESET');
+        state = body.historyImportEnabled === true && resetAt === null ? 'allow'
+          : body.historyImportEnabled === false || resetAt !== null ? 'fresh' : 'unknown';
       } catch {
         state = 'unknown';
         privatePhones = null;
         mode = null;
         approvedPhones = null;
+        resetAt = null;
       }
       expiresAt = now() + ttlMs;
       return current();
@@ -66,7 +70,12 @@ export function createHistoryPrivacyPolicy({
     const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
     return Boolean(match && privatePhones.includes(match[1]));
   }
-  return { get, current, contactAllowed, metadataAllowed, explicitlyBlocked };
+  function beforeReset(occurredAt, historical=false) {
+    if (!valid() || resetAt === null) return false;
+    const at = typeof occurredAt === 'number' ? (occurredAt < 1e12 ? occurredAt * 1000 : occurredAt) : Date.parse(occurredAt || '');
+    return historical || !Number.isFinite(at) || at < resetAt;
+  }
+  return { get, current, contactAllowed, metadataAllowed, explicitlyBlocked, beforeReset };
 }
 
 export function allowsMirrorEvent(event, policy) {
