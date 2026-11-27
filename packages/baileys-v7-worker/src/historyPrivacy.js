@@ -5,6 +5,7 @@ export function createHistoryPrivacyPolicy({
 }) {
   let state = 'unknown';
   let privatePhones = null;
+  let removedPhones = null;
   let mode = null;
   let approvedPhones = null;
   let expiresAt = 0;
@@ -34,6 +35,7 @@ export function createHistoryPrivacyPolicy({
         privatePhones = Array.isArray(body.privateContactPhones) && body.privateContactPhones.length <= 1100 &&
           body.privateContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p))
           ? body.privateContactPhones : null;
+        removedPhones = Array.isArray(body.removedContactPhones) && body.removedContactPhones.length<=1000 && body.removedContactPhones.every(p=>typeof p==='string' && /^[1-9]\d{7,14}$/.test(p) && privatePhones?.includes(p)) ? body.removedContactPhones : null;
         mode = ['ALL', 'BUSINESS_ONLY', 'MANUAL'].includes(body.mode) ? body.mode : null;
         approvedPhones = Array.isArray(body.approvedContactPhones) && body.approvedContactPhones.length <= 1000 &&
           body.approvedContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p)) ? body.approvedContactPhones : null;
@@ -44,6 +46,7 @@ export function createHistoryPrivacyPolicy({
       } catch {
         state = 'unknown';
         privatePhones = null;
+        removedPhones = null;
         mode = null;
         approvedPhones = null;
         resetAt = null;
@@ -70,12 +73,27 @@ export function createHistoryPrivacyPolicy({
     const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
     return Boolean(match && privatePhones.includes(match[1]));
   }
+  // OTP is the exact server-generated verification template and a reserved
+  // idempotency namespace on the bearer-authenticated managed send endpoint.
+  function outboundAllowed(key,idempotencyKey,text) {
+    if(!valid())return false;
+    const match=/^\+?([1-9]\d{7,14})$/.exec(String(key||''));
+    if(!match||privatePhones.includes(match[1]))return false;
+    if(mode!=='BUSINESS_ONLY'||approvedPhones.includes(match[1]))return true;
+    return /^otp:[0-9a-f-]{36}:.+$/i.test(String(idempotencyKey||'')) &&
+      /^رمز التحقق الخاص بك في (?:CUT CLUB|حسابك): \*\d{6}\*\nصالح لمدة 5 دقائق\. لا تشارك الرمز مع أي شخص\.\nإذا لم تطلب الرمز، تجاهل هذه الرسالة\.$/u.test(String(text||''));
+  }
+  function explicitlyRemoved(key){
+    if(!valid()||!removedPhones)return false;
+    const match=/^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key||''));
+    return Boolean(match&&removedPhones.includes(match[1]));
+  }
   function beforeReset(occurredAt, historical=false) {
     if (!valid() || resetAt === null) return false;
     const at = typeof occurredAt === 'number' ? (occurredAt < 1e12 ? occurredAt * 1000 : occurredAt) : Date.parse(occurredAt || '');
     return historical || !Number.isFinite(at) || at < resetAt;
   }
-  return { get, current, contactAllowed, metadataAllowed, explicitlyBlocked, beforeReset };
+  return { get, current, contactAllowed, metadataAllowed, explicitlyBlocked, explicitlyRemoved, outboundAllowed, beforeReset };
 }
 
 export function allowsMirrorEvent(event, policy) {

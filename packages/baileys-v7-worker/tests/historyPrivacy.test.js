@@ -94,3 +94,18 @@ test('workspace reset rejects pre-cutoff events and historical metadata but acce
  assert.equal(policy.beforeReset('2026-11-27T00:00:01Z'),false);
  clock+=11;assert.equal(policy.beforeReset(null),false);assert.equal(policy.contactAllowed('201001234567'),false);
 });
+
+test('OTP is a narrow exception to business approval, never private exclusion or arbitrary sends',async()=>{
+ const p=createHistoryPrivacyPolicy({accountKey:'a',token:'t',baseUrl:'http://localhost',fetchFn:async()=>({ok:true,json:async()=>({historyImportEnabled:false,mode:'BUSINESS_ONLY',privateContactPhones:['201001234567','201001234568'],removedContactPhones:['201001234568'],approvedContactPhones:[]})})});
+ await p.get();
+ const key='otp:11111111-1111-4111-8111-111111111111:req';
+ const message='رمز التحقق الخاص بك في CUT CLUB: *123456*\nصالح لمدة 5 دقائق. لا تشارك الرمز مع أي شخص.\nإذا لم تطلب الرمز، تجاهل هذه الرسالة.';
+ assert.equal(p.outboundAllowed('201001234569',key,message),true);
+ assert.equal(p.outboundAllowed('201001234567',key,message),false);
+ assert.equal(p.outboundAllowed('201001234568',key,message),false);
+ assert.equal(p.outboundAllowed('201001234569',key,'arbitrary'),false);
+ assert.equal(p.outboundAllowed('201001234569','ai:job',message),false);
+ assert.equal(p.contactAllowed('201001234569'),false);
+ assert.equal(p.explicitlyRemoved('201001234567'),false);
+ assert.equal(p.explicitlyRemoved('201001234568'),true);
+});

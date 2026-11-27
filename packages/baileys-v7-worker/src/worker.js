@@ -267,7 +267,7 @@ async function flushInboundSpool() {
     inboundSpool.purgeMatching(item => {
       const dto=item.drvowaDto || item.normalizedEvent;
       return historyPrivacy.beforeReset(dto?.messageTimestamp || dto?.receivedAt) ||
-        (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyBlocked(dto?.externalContactKey));
+        (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyRemoved(dto?.externalContactKey));
     });
     for (const item of inboundSpool.getPendingForDelivery().filter(item =>
       historyPrivacy.contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey)).slice(0, 40)) {
@@ -410,7 +410,7 @@ async function flushMediaSpool() {
   try {
     const policy = await historyPrivacy.get();
     mediaSpool.purgeMatching(row =>
-      historyPrivacy.beforeReset(row.normalizedEvent.payload?.occurredAt,row.normalizedEvent.payload?.historical) || (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyBlocked(row.normalizedEvent.payload?.contactKey)), row => {
+      historyPrivacy.beforeReset(row.normalizedEvent.payload?.occurredAt,row.normalizedEvent.payload?.historical) || (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyRemoved(row.normalizedEvent.payload?.contactKey)), row => {
         // Derive the path from the durable ID; never delete a journal-supplied arbitrary path.
         const key = createHash('sha256').update(row.providerMessageId).digest('hex');
         const expected = path.join(MEDIA_DIR, key);
@@ -465,7 +465,7 @@ async function flushMirrorSpool() {
     const policy = await historyPrivacy.get();
     mirrorSpool.purgeMatching(row => {
       const event=row.normalizedEvent.payload;
-      return historyPrivacy.beforeReset(event?.occurredAt,event?.kind !== 'message' || event?.historical) || (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyBlocked(event?.contactKey));
+      return historyPrivacy.beforeReset(event?.occurredAt,event?.kind !== 'message' || event?.historical) || (PRIVACY_SPOOL_PURGE_ENABLED && historyPrivacy.explicitlyRemoved(event?.contactKey));
     });
     const pending = mirrorSpool.getPendingForDelivery()
       .filter(row => allowsMirrorEvent(row.normalizedEvent.payload, policy) && eventContactAllowed(row.normalizedEvent.payload)).slice(0, 24);
@@ -779,7 +779,7 @@ async function handleSend({ phone, message, idempotencyKey }) {
     // The queued send may have waited while owner changed privacy settings.
     // Re-fetch immediately before dispatch; no cached policy authorizes sending.
     await historyPrivacy.get({ force: true });
-    if (!historyPrivacy.contactAllowed(digits)) {
+    if (!historyPrivacy.outboundAllowed(digits,idempotencyKey,text)) {
       return { success: false, status: 'failed', error: 'Privacy policy blocks destination or is unavailable', code: 'PRIVATE_CONTACT_OR_POLICY_UNAVAILABLE', httpStatus: 403 };
     }
     const jid = `${digits}@s.whatsapp.net`;
