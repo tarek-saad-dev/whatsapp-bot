@@ -66,6 +66,7 @@ const mirrorSpool = createDurableMirrorSpool({ journalFile: path.join(AUTH_DIR, 
 const mediaSpool = createDurableMirrorSpool({ journalFile: path.join(AUTH_DIR, 'v7-media-sync.ndjson') });
 const MEDIA_DIR = path.join(AUTH_DIR, 'v7-media-pending');
 const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
+const PRIVACY_SPOOL_PURGE_ENABLED = process.env.V7_PRIVACY_SPOOL_PURGE_ENABLED === 'true';
 let mediaChain = Promise.resolve();
 let mediaBusy = false;
 let mediaTimer = null;
@@ -263,6 +264,8 @@ async function flushInboundSpool() {
   deliveryBusy = true;
   try {
     await historyPrivacy.get();
+    if (PRIVACY_SPOOL_PURGE_ENABLED) inboundSpool.purgeMatching(item =>
+      historyPrivacy.explicitlyBlocked((item.drvowaDto || item.normalizedEvent)?.externalContactKey));
     for (const item of inboundSpool.getPendingForDelivery().filter(item =>
       historyPrivacy.contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey)).slice(0, 40)) {
       if (!(await contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey))) continue;
@@ -401,6 +404,14 @@ async function flushMediaSpool() {
   mediaBusy = true;
   try {
     const policy = await historyPrivacy.get();
+    if (PRIVACY_SPOOL_PURGE_ENABLED) mediaSpool.purgeMatching(row =>
+      historyPrivacy.explicitlyBlocked(row.normalizedEvent.payload?.contactKey), row => {
+        // Derive the path from the durable ID; never delete a journal-supplied arbitrary path.
+        const key = createHash('sha256').update(row.providerMessageId).digest('hex');
+        const expected = path.join(MEDIA_DIR, key);
+        if (row.normalizedEvent.payload?.filePath !== expected) throw new Error('MEDIA_PATH_MISMATCH');
+        fs.rmSync(expected, { force: true });
+      });
     const pending = mediaSpool.getPendingForDelivery()
       .filter(row => allowsMediaEvent(row.normalizedEvent.payload, policy) && historyPrivacy.contactAllowed(row.normalizedEvent.payload?.contactKey)).slice(0, 6);
     if (!pending.length) return;
@@ -447,6 +458,8 @@ async function flushMirrorSpool() {
   mirrorBusy = true;
   try {
     const policy = await historyPrivacy.get();
+    if (PRIVACY_SPOOL_PURGE_ENABLED) mirrorSpool.purgeMatching(row =>
+      historyPrivacy.explicitlyBlocked(row.normalizedEvent.payload?.contactKey));
     const pending = mirrorSpool.getPendingForDelivery()
       .filter(row => allowsMirrorEvent(row.normalizedEvent.payload, policy) && eventContactAllowed(row.normalizedEvent.payload)).slice(0, 24);
     if (!pending.length) return;

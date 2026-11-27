@@ -69,7 +69,33 @@ export function createDurableMirrorSpool({ journalFile, compactAfterBytes = 24 *
     compactIfNeeded();
   }
 
+  // Rewrite before mutating in-memory state so a failed write preserves the queue.
+  function purgeMatching(predicate, beforeRemove = () => {}) {
+    const removed = [...records.values()].filter(predicate);
+    if (!removed.length) return 0;
+    const ids = new Set(removed.map(row => row.providerMessageId));
+    // For media, delete files first; failure retains journal entries for retry.
+    for (const row of removed) beforeRemove(row);
+    const ops = [];
+    for (const row of records.values()) {
+      if (ids.has(row.providerMessageId)) continue;
+      ops.push(JSON.stringify({ kind: 'capture', id: row.providerMessageId, event: row.normalizedEvent, at: row.capturedAt }));
+      if (row.status !== 'pending_delivery' || row.attempts > 0)
+        ops.push(JSON.stringify({ kind: 'state', id: row.providerMessageId,
+          status: row.status, attempts: row.attempts, nextRetryAt: row.nextRetryAt, deliveredAt: row.deliveredAt }));
+    }
+    const tmp = journalFile + '.privacy-purge';
+    try {
+      fs.writeFileSync(tmp, ops.length ? ops.join('\n') + '\n' : '', { mode: 0o600 });
+      fs.renameSync(tmp, journalFile);
+    } finally { fs.rmSync(tmp, { force: true }); }
+    for (const id of ids) records.delete(id);
+    writes = 0;
+    return removed.length;
+  }
+
   return {
+    purgeMatching,
     capture(event) {
       const id = event?.providerMessageId;
       if (!id) throw new Error('missing providerMessageId');

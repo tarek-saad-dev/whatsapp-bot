@@ -57,7 +57,14 @@ export function createHistoryPrivacyPolicy({
     return now() < expiresAt && privatePhones !== null && privatePhones.length === 0 &&
       mode !== null && mode !== 'BUSINESS_ONLY' && approvedPhones !== null;
   }
-  return { get, current, contactAllowed, metadataAllowed };
+  // Do not treat an outage, unresolved identity or unapproved business-only
+  // contact as consent to erase a queue. Only an explicit block qualifies.
+  function explicitlyBlocked(key) {
+    if (now() >= expiresAt || privatePhones === null || mode === null || approvedPhones === null) return false;
+    const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
+    return Boolean(match && privatePhones.includes(match[1]));
+  }
+  return { get, current, contactAllowed, metadataAllowed, explicitlyBlocked };
 }
 
 export function allowsMirrorEvent(event, policy) {
