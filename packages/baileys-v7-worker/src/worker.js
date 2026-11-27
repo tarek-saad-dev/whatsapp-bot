@@ -33,6 +33,7 @@ import { createDeliveryEvidence } from './deliveryEvidence.js';
 import { createPeerCryptoHealth } from './peerCryptoHealth.js';
 import { createReconnectPolicy } from './reconnectPolicy.js';
 import { createIncidentMonitor } from './incidentMonitor.js';
+import { createIncidentStore } from './incidentStore.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -70,7 +71,8 @@ const retryStore = createRetryStore();
 const deliveryEvidence = createDeliveryEvidence();
 const peerCryptoHealth = createPeerCryptoHealth();
 const reconnectPolicy = createReconnectPolicy();
-const incidentMonitor = createIncidentMonitor({ onTransition: event => {
+const incidentStore = createIncidentStore(path.join(AUTH_DIR, 'v7-reliability-incidents.json'));
+const incidentMonitor = createIncidentMonitor({ ...incidentStore, onTransition: event => {
   console.info('[v7-reliability-incident]', JSON.stringify({ accountKeyPrefix: ACCOUNT_KEY.slice(0, 10), ...event }));
 } });
 let incidentTimer = null;
