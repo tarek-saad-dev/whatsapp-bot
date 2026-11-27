@@ -19,6 +19,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   Browsers,
   downloadMediaMessage,
+  generateMessageIDV2,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -29,6 +30,7 @@ import { buildV7InboundDto } from './dto.js';
 import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
 import { createRetryStore } from './retryStore.js';
+import { createPendingRetryBridge } from './pendingRetryBridge.js';
 import { createDeliveryEvidence } from './deliveryEvidence.js';
 import { createPeerCryptoHealth } from './peerCryptoHealth.js';
 import { createReconnectPolicy } from './reconnectPolicy.js';
@@ -68,6 +70,7 @@ let labelEventsSeen = 0;
 let labelEventsSkipped = 0;
 const cryptoHealth = createCryptoHealth();
 const retryStore = createRetryStore();
+const pendingRetry = createPendingRetryBridge(retryStore);
 const deliveryEvidence = createDeliveryEvidence();
 const peerCryptoHealth = createPeerCryptoHealth();
 const reconnectPolicy = createReconnectPolicy();
@@ -141,7 +144,7 @@ function getStatus() {
     incidentMonitor: incidentMonitor.snapshot(),
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
-    outboundRetry: retryStore.stats(),
+    outboundRetry: { ...retryStore.stats(), early: pendingRetry.stats() },
     deliveryEvidence: deliveryEvidence.snapshot(),
     peerCryptoHealth: peerCryptoHealth.snapshot(),
     // The SaaS dashboard must distinguish a stopped delivery timer from an
@@ -586,7 +589,7 @@ async function startSocket() {
     syncFullHistory: process.env.V7_HISTORY_SYNC_ENABLED !== 'false',
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
-    getMessage: (key) => retryStore.getMessage(key),
+    getMessage: (key) => pendingRetry.getMessage(key),
   });
 
   const currentSocket = sock;
@@ -713,12 +716,23 @@ async function handleSend({ phone, message, idempotencyKey }) {
     const jid = `${digits}@s.whatsapp.net`;
     const sendingSocket = sock;
     const sendingConnectedAt = snapshot.lastConnectedAt;
-    const result = await sendingSocket.sendMessage(jid, { text });
+    // Check again after waiting in the send queue; no send on a stopped socket.
+    if (!sendingSocket || stopping || !snapshot.ready) {
+      return { success: false, status: 'failed', code: 'NOT_READY', error: 'Account is not READY', httpStatus: 409 };
+    }
+    const messageId = generateMessageIDV2(sendingSocket.user?.id);
+    const release = pendingRetry.reserve({ id: messageId, remoteJid: jid, fromMe: true });
+    let result;
+    try {
+      result = await sendingSocket.sendMessage(jid, { text }, { messageId });
+      if (result?.key?.id && result?.message) retryStore.put(result.key, result.message, jid);
+    } finally {
+      release();
+    }
     if (sock === sendingSocket && snapshot.ready && snapshot.lastConnectedAt === sendingConnectedAt) {
       deliveryEvidence.recordSent(result?.key, jid);
       emitStatus();
     }
-    if (result?.key?.id && result?.message) retryStore.put(result.key, result.message, jid);
     let providerMessageId = null;
     if (result && typeof result === 'object') {
       if (result.key && result.key.id) providerMessageId = String(result.key.id);
@@ -753,6 +767,7 @@ async function shutdown() {
   reconnectPolicy.stopped();
   if (incidentTimer) { clearInterval(incidentTimer); incidentTimer = null; }
   clearInterval(retrySweepTimer);
+  pendingRetry.clear();
   retryStore.clear();
   if (inboundTimer) clearInterval(inboundTimer);
   if (receiptTimer) clearInterval(receiptTimer);
