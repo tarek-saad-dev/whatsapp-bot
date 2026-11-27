@@ -271,9 +271,24 @@ function createInboxSpool({ spoolFile = SPOOL_FILE } = {}) {
             }));
     }
 
+    function purgeMatching(predicate) {
+        const removed = Array.from(records.values()).filter(predicate);
+        if (!removed.length) return 0;
+        const ids = new Set(removed.map(record => record.providerMessageId));
+        const tmp = spoolFile + '.privacy-purge';
+        try {
+            fs.writeFileSync(tmp, JSON.stringify({ version: 1, updatedAt: utcNow(),
+                records: Array.from(records.values()).filter(record => !ids.has(record.providerMessageId)) }, null, 2), { mode: 0o600 });
+            fs.renameSync(tmp, spoolFile);
+        } finally { fs.rmSync(tmp, { force: true }); }
+        for (const id of ids) records.delete(id);
+        return removed.length;
+    }
+
     load();
 
     return {
+        purgeMatching,
         STATUS,
         spoolFile,
         load,

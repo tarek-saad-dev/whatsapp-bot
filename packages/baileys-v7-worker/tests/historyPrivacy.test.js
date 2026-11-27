@@ -1,0 +1,111 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHistoryPrivacyPolicy, allowsMirrorEvent, allowsMediaEvent } from '../src/historyPrivacy.js';
+
+test('account scoped consent expires and fails closed, without blocking live messages', async () => {
+  let clock = 1;
+  let mode = true;
+  const policy = createHistoryPrivacyPolicy({ accountKey: 'account-1', token: 'test',
+    baseUrl: 'http://localhost', now: () => clock, ttlMs: 10,
+    fetchFn: async (url, options) => {
+      assert.equal(url, 'http://localhost/api/runtime/whatsapp/privacy');
+      assert.deepEqual(JSON.parse(options.body), { accountKey: 'account-1' });
+      if (mode === null) throw new Error('network');
+      return { ok: true, json: async () => ({ historyImportEnabled: mode, privateContactPhones: [], mode: 'ALL', approvedContactPhones: [] }) };
+    },
+  });
+  assert.equal(policy.current(), 'unknown');
+  assert.equal(await policy.get(), 'allow');
+  clock += 11;
+  assert.equal(policy.current(), 'unknown');
+  mode = false;
+  assert.equal(await policy.get(), 'fresh');
+  assert.equal(allowsMirrorEvent({ kind: 'message', historical: true }, policy.current()), false);
+  assert.equal(allowsMirrorEvent({ kind: 'message', historical: false }, policy.current()), true);
+  mode = null; clock += 11;
+  assert.equal(await policy.get(), 'unknown');
+  assert.equal(allowsMirrorEvent({ kind: 'chat' }, policy.current()), false);
+});
+
+test('fresh or unknown policy filters pre-existing mirror and media spools', () => {
+  for (const mode of ['fresh', 'unknown']) {
+    for (const kind of ['chat', 'label', 'labelAssociation']) assert.equal(allowsMirrorEvent({ kind }, mode), false);
+    assert.equal(allowsMediaEvent({ historical: true }, mode), false);
+    assert.equal(allowsMediaEvent({}, mode), false);
+    assert.equal(allowsMediaEvent({ historical: false }, mode), true);
+    assert.equal(allowsMirrorEvent({ kind: 'message' }, mode), false);
+  }
+  assert.equal(allowsMediaEvent({}, 'allow'), true);
+});
+
+test('global disabled switch cannot be overridden by server consent', async () => {
+  const policy = createHistoryPrivacyPolicy({ enabled: false, accountKey: 'test', token: 'test',
+    fetchFn: async () => ({ ok: true, json: async () => ({ historyImportEnabled: true, privateContactPhones: [], mode: 'ALL', approvedContactPhones: [] }) }) });
+  assert.equal(await policy.get(), 'fresh');
+});
+
+test('private contact policy blocks unresolved and excluded identities, expires fail closed', async () => {
+  let clock = 1;
+  const policy = createHistoryPrivacyPolicy({ accountKey: 'a', token: 'test', baseUrl: 'http://localhost',
+    now: () => clock, ttlMs: 10,
+    fetchFn: async () => ({ ok: true, json: async () => ({ historyImportEnabled: true, privateContactPhones: ['201001234567'], mode: 'ALL', approvedContactPhones: [] }) }),
+  });
+  assert.equal(policy.contactAllowed('201001234568'), false);
+  await policy.get();
+  assert.equal(policy.contactAllowed('201001234567@s.whatsapp.net'), false);
+  assert.equal(policy.contactAllowed('123456789@lid'), false);
+  assert.equal(policy.contactAllowed('201001234568@s.whatsapp.net'), true);
+  assert.equal(policy.metadataAllowed(), false);
+  clock += 11;
+  assert.equal(policy.contactAllowed('201001234568'), false);
+});
+
+test('business-only capture requires explicit approval and private exclusion wins', async () => {
+ let mode = 'BUSINESS_ONLY';
+ const policy = createHistoryPrivacyPolicy({ accountKey:'a', token:'test', baseUrl:'http://localhost',
+   fetchFn: async()=>({ok:true,json:async()=>({historyImportEnabled:true,privateContactPhones:['201001234567'],
+     mode,approvedContactPhones:['201001234567','201001234568']})}) });
+ await policy.get();
+ assert.equal(policy.contactAllowed('201001234567'),false);
+ assert.equal(policy.contactAllowed('201001234568@s.whatsapp.net'),true);
+ assert.equal(policy.contactAllowed('201001234569'),false);
+ assert.equal(policy.contactAllowed('123456789@lid'),false);
+ assert.equal(policy.metadataAllowed(),false);
+ mode='MANUAL';await policy.get({force:true});
+ assert.equal(policy.contactAllowed('201001234569'),true);
+ assert.equal(policy.contactAllowed('201001234567'),false);
+});
+
+test('invalid policy cannot authorize contact or historical capture', async () => {
+ const policy = createHistoryPrivacyPolicy({accountKey:'a',token:'test',baseUrl:'http://localhost',
+ fetchFn: async()=>({ok:true,json:async()=>({historyImportEnabled:true,privateContactPhones:[],mode:'INVALID',approvedContactPhones:[]})})});
+ assert.equal(await policy.get(),'unknown');
+ assert.equal(policy.contactAllowed('201001234567'),false);
+ assert.equal(policy.metadataAllowed(),false);
+});
+
+test('workspace reset rejects pre-cutoff events and historical metadata but accepts new live events',async()=>{
+ let clock=1;const resetAtUtc='2026-11-27T00:00:00.000Z';
+ const policy=createHistoryPrivacyPolicy({accountKey:'a',token:'test',baseUrl:'http://localhost',now:()=>clock,ttlMs:10,fetchFn:async()=>({ok:true,json:async()=>({historyImportEnabled:true,privateContactPhones:[],mode:'ALL',approvedContactPhones:[],resetAtUtc})})});
+ assert.equal(await policy.get(),'fresh');
+ assert.equal(policy.beforeReset('2026-11-26T23:59:59Z'),true);
+ assert.equal(policy.beforeReset(null),true);
+ assert.equal(policy.beforeReset('2026-11-27T00:00:01Z',true),true);
+ assert.equal(policy.beforeReset('2026-11-27T00:00:01Z'),false);
+ clock+=11;assert.equal(policy.beforeReset(null),false);assert.equal(policy.contactAllowed('201001234567'),false);
+});
+
+test('OTP is a narrow exception to business approval, never private exclusion or arbitrary sends',async()=>{
+ const p=createHistoryPrivacyPolicy({accountKey:'a',token:'t',baseUrl:'http://localhost',fetchFn:async()=>({ok:true,json:async()=>({historyImportEnabled:false,mode:'BUSINESS_ONLY',privateContactPhones:['201001234567','201001234568'],removedContactPhones:['201001234568'],approvedContactPhones:[]})})});
+ await p.get();
+ const key='otp:11111111-1111-4111-8111-111111111111:req';
+ const message='رمز التحقق الخاص بك في CUT CLUB: *123456*\nصالح لمدة 5 دقائق. لا تشارك الرمز مع أي شخص.\nإذا لم تطلب الرمز، تجاهل هذه الرسالة.';
+ assert.equal(p.outboundAllowed('201001234569',key,message),true);
+ assert.equal(p.outboundAllowed('201001234567',key,message),false);
+ assert.equal(p.outboundAllowed('201001234568',key,message),false);
+ assert.equal(p.outboundAllowed('201001234569',key,'arbitrary'),false);
+ assert.equal(p.outboundAllowed('201001234569','ai:job',message),false);
+ assert.equal(p.contactAllowed('201001234569'),false);
+ assert.equal(p.explicitlyRemoved('201001234567'),false);
+ assert.equal(p.explicitlyRemoved('201001234568'),true);
+});
