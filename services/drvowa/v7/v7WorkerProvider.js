@@ -347,6 +347,9 @@ function createV7WorkerProvider({
       ...lastStatus,
       authDir,
       runtimeEngine: 'BAILEYS_V7',
+      deliveryEvidence: lastStatus.ready ? (lastStatus.deliveryEvidence ?? null) : {
+        status: 'NOT_CONNECTED', lastLivePlaintextAt: null, lastOutboundDeliveryAckAt: null, pendingReceiptCount: 0,
+      },
       outboundObservation: {
         running: Boolean(outboundObs.running),
         deliveryEnabled: Boolean(outboundObs.deliveryEnabled),

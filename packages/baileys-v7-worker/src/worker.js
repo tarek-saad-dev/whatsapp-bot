@@ -29,6 +29,7 @@ import { buildV7InboundDto } from './dto.js';
 import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
 import { createRetryStore } from './retryStore.js';
+import { createDeliveryEvidence } from './deliveryEvidence.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -63,6 +64,7 @@ let labelEventsSeen = 0;
 let labelEventsSkipped = 0;
 const cryptoHealth = createCryptoHealth();
 const retryStore = createRetryStore();
+const deliveryEvidence = createDeliveryEvidence();
 const retrySweepTimer = setInterval(() => retryStore.sweep(), 15_000);
 retrySweepTimer.unref();
 let deliveryBusy = false;
@@ -104,6 +106,7 @@ function emitStatus() {
 function setState(state, extra = {}) {
   snapshot.state = state;
   snapshot.ready = state === 'READY';
+  deliveryEvidence.setConnected(snapshot.ready);
   Object.assign(snapshot, extra);
   emitStatus();
 }
@@ -124,6 +127,7 @@ function getStatus() {
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
     outboundRetry: retryStore.stats(),
+    deliveryEvidence: deliveryEvidence.snapshot(),
     // The SaaS dashboard must distinguish a stopped delivery timer from an
     // older runtime omitting the liveness field. V6 already reports "running".
     inboundDelivery: deliverer ? {
@@ -521,6 +525,7 @@ function onMessagesUpsert(upsert) {
        || msg?.message?.stickerMessage) scheduleMirrorMessage(msg, type !== 'notify');
     if (summary.plaintextPresent === 'YES') {
       cryptoHealth.recordPlaintext();
+      deliveryEvidence.recordInbound(key, type, true);
       maybeDeliver(msg, type).catch((error) => {
         console.error('[v7-reliability] inbound_capture_failed', String(error?.code || error?.name || 'CAPTURE_ERROR'));
       });
@@ -567,8 +572,10 @@ async function startSocket() {
     getMessage: (key) => retryStore.getMessage(key),
   });
 
+  const currentSocket = sock;
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async (update) => {
+    if (sock !== currentSocket || stopping) return;
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       try {
@@ -614,7 +621,17 @@ async function startSocket() {
       }
     }
   });
-  sock.ev.on('messages.upsert', onMessagesUpsert);
+  sock.ev.on('messages.upsert', (update) => {
+    if (sock === currentSocket && !stopping) onMessagesUpsert(update);
+  });
+  sock.ev.on('messages.update', (updates) => {
+    if (sock !== currentSocket || stopping) return;
+    let changed = false;
+    for (const item of Array.isArray(updates) ? updates : []) {
+      if (deliveryEvidence.recordUpdate(item?.key, item?.update?.status)) changed = true;
+    }
+    if (changed) emitStatus();
+  });
   sock.ev.on('messaging-history.set', onHistorySet);
   sock.ev.on('labels.edit', scheduleLabelEdit);
   sock.ev.on('labels.association', scheduleLabelAssociation);
@@ -663,7 +680,13 @@ async function handleSend({ phone, message, idempotencyKey }) {
 
   return enqueueSend(async () => {
     const jid = `${digits}@s.whatsapp.net`;
-    const result = await sock.sendMessage(jid, { text });
+    const sendingSocket = sock;
+    const sendingConnectedAt = snapshot.lastConnectedAt;
+    const result = await sendingSocket.sendMessage(jid, { text });
+    if (sock === sendingSocket && snapshot.ready && snapshot.lastConnectedAt === sendingConnectedAt) {
+      deliveryEvidence.recordSent(result?.key, jid);
+      emitStatus();
+    }
     if (result?.key?.id && result?.message) retryStore.put(result.key, result.message, jid);
     let providerMessageId = null;
     if (result && typeof result === 'object') {
