@@ -27,7 +27,7 @@ export function createHistoryPrivacyPolicy({
         });
         if (!response.ok) throw new Error('POLICY_UNAVAILABLE');
         const body = await response.json();
-        privatePhones = Array.isArray(body.privateContactPhones) && body.privateContactPhones.length <= 100 &&
+        privatePhones = Array.isArray(body.privateContactPhones) && body.privateContactPhones.length <= 1100 &&
           body.privateContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p))
           ? body.privateContactPhones : null;
         mode = ['ALL', 'BUSINESS_ONLY', 'MANUAL'].includes(body.mode) ? body.mode : null;
