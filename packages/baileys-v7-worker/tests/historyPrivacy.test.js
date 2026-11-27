@@ -11,7 +11,7 @@ test('account scoped consent expires and fails closed, without blocking live mes
       assert.equal(url, 'http://localhost/api/runtime/whatsapp/privacy');
       assert.deepEqual(JSON.parse(options.body), { accountKey: 'account-1' });
       if (mode === null) throw new Error('network');
-      return { ok: true, json: async () => ({ historyImportEnabled: mode, privateContactPhones: [] }) };
+      return { ok: true, json: async () => ({ historyImportEnabled: mode, privateContactPhones: [], mode: 'ALL', approvedContactPhones: [] }) };
     },
   });
   assert.equal(policy.current(), 'unknown');
@@ -40,7 +40,7 @@ test('fresh or unknown policy filters pre-existing mirror and media spools', () 
 
 test('global disabled switch cannot be overridden by server consent', async () => {
   const policy = createHistoryPrivacyPolicy({ enabled: false, accountKey: 'test', token: 'test',
-    fetchFn: async () => ({ ok: true, json: async () => ({ historyImportEnabled: true, privateContactPhones: [] }) }) });
+    fetchFn: async () => ({ ok: true, json: async () => ({ historyImportEnabled: true, privateContactPhones: [], mode: 'ALL', approvedContactPhones: [] }) }) });
   assert.equal(await policy.get(), 'fresh');
 });
 
@@ -48,7 +48,7 @@ test('private contact policy blocks unresolved and excluded identities, expires 
   let clock = 1;
   const policy = createHistoryPrivacyPolicy({ accountKey: 'a', token: 'test', baseUrl: 'http://localhost',
     now: () => clock, ttlMs: 10,
-    fetchFn: async () => ({ ok: true, json: async () => ({ historyImportEnabled: true, privateContactPhones: ['201001234567'] }) }),
+    fetchFn: async () => ({ ok: true, json: async () => ({ historyImportEnabled: true, privateContactPhones: ['201001234567'], mode: 'ALL', approvedContactPhones: [] }) }),
   });
   assert.equal(policy.contactAllowed('201001234568'), false);
   await policy.get();
@@ -58,4 +58,20 @@ test('private contact policy blocks unresolved and excluded identities, expires 
   assert.equal(policy.metadataAllowed(), false);
   clock += 11;
   assert.equal(policy.contactAllowed('201001234568'), false);
+});
+
+test('business-only capture requires explicit approval and private exclusion wins', async () => {
+ let mode = 'BUSINESS_ONLY';
+ const policy = createHistoryPrivacyPolicy({ accountKey:'a', token:'test', baseUrl:'http://localhost',
+   fetchFn: async()=>({ok:true,json:async()=>({historyImportEnabled:true,privateContactPhones:['201001234567'],
+     mode,approvedContactPhones:['201001234567','201001234568']})}) });
+ await policy.get();
+ assert.equal(policy.contactAllowed('201001234567'),false);
+ assert.equal(policy.contactAllowed('201001234568@s.whatsapp.net'),true);
+ assert.equal(policy.contactAllowed('201001234569'),false);
+ assert.equal(policy.contactAllowed('123456789@lid'),false);
+ assert.equal(policy.metadataAllowed(),false);
+ mode='MANUAL';await policy.get({force:true});
+ assert.equal(policy.contactAllowed('201001234569'),true);
+ assert.equal(policy.contactAllowed('201001234567'),false);
 });

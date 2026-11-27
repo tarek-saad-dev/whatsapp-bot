@@ -5,6 +5,8 @@ export function createHistoryPrivacyPolicy({
 }) {
   let state = 'unknown';
   let privatePhones = null;
+  let mode = null;
+  let approvedPhones = null;
   let expiresAt = 0;
   let inFlight = null;
   function current() {
@@ -28,11 +30,16 @@ export function createHistoryPrivacyPolicy({
         privatePhones = Array.isArray(body.privateContactPhones) && body.privateContactPhones.length <= 100 &&
           body.privateContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p))
           ? body.privateContactPhones : null;
+        mode = ['ALL', 'BUSINESS_ONLY', 'MANUAL'].includes(body.mode) ? body.mode : null;
+        approvedPhones = Array.isArray(body.approvedContactPhones) && body.approvedContactPhones.length <= 1000 &&
+          body.approvedContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p)) ? body.approvedContactPhones : null;
         state = body.historyImportEnabled === true ? 'allow'
           : body.historyImportEnabled === false ? 'fresh' : 'unknown';
       } catch {
         state = 'unknown';
         privatePhones = null;
+        mode = null;
+        approvedPhones = null;
       }
       expiresAt = now() + ttlMs;
       return current();
@@ -40,13 +47,15 @@ export function createHistoryPrivacyPolicy({
     try { return await inFlight; } finally { inFlight = null; }
   }
   function contactAllowed(key) {
-    if (now() >= expiresAt || privatePhones === null) return false;
-    if (!privatePhones.length) return true;
+    if (now() >= expiresAt || privatePhones === null || mode === null || approvedPhones === null) return false;
+    if (!privatePhones.length && mode !== 'BUSINESS_ONLY') return true;
     const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
-    return Boolean(match && !privatePhones.includes(match[1]));
+    return Boolean(match && !privatePhones.includes(match[1]) &&
+      (mode !== 'BUSINESS_ONLY' || approvedPhones.includes(match[1])));
   }
   function metadataAllowed() {
-    return now() < expiresAt && privatePhones !== null && privatePhones.length === 0;
+    return now() < expiresAt && privatePhones !== null && privatePhones.length === 0 &&
+      mode !== null && mode !== 'BUSINESS_ONLY' && approvedPhones !== null;
   }
   return { get, current, contactAllowed, metadataAllowed };
 }
