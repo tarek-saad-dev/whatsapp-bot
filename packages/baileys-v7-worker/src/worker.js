@@ -32,6 +32,7 @@ import { createRetryStore } from './retryStore.js';
 import { createDeliveryEvidence } from './deliveryEvidence.js';
 import { createPeerCryptoHealth } from './peerCryptoHealth.js';
 import { createReconnectPolicy } from './reconnectPolicy.js';
+import { createIncidentMonitor } from './incidentMonitor.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -69,6 +70,10 @@ const retryStore = createRetryStore();
 const deliveryEvidence = createDeliveryEvidence();
 const peerCryptoHealth = createPeerCryptoHealth();
 const reconnectPolicy = createReconnectPolicy();
+const incidentMonitor = createIncidentMonitor({ onTransition: event => {
+  console.info('[v7-reliability-incident]', JSON.stringify({ accountKeyPrefix: ACCOUNT_KEY.slice(0, 10), ...event }));
+} });
+let incidentTimer = null;
 let reconnectTimer = null;
 const retrySweepTimer = setInterval(() => retryStore.sweep(), 15_000);
 retrySweepTimer.unref();
@@ -131,6 +136,7 @@ function getStatus() {
     lastErrorCode: snapshot.lastErrorCode,
     reconnectAttempts: reconnectPolicy.snapshot().attempts,
     socketRecovery: reconnectPolicy.snapshot(),
+    incidentMonitor: incidentMonitor.snapshot(),
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
     outboundRetry: retryStore.stats(),
@@ -743,6 +749,7 @@ async function shutdown() {
   stopping = true;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   reconnectPolicy.stopped();
+  if (incidentTimer) { clearInterval(incidentTimer); incidentTimer = null; }
   clearInterval(retrySweepTimer);
   retryStore.clear();
   if (inboundTimer) clearInterval(inboundTimer);
@@ -826,6 +833,14 @@ async function main() {
   void flushInboundSpool();
   void reportInboundReceipts();
   setState('STARTING');
+  incidentTimer = setInterval(() => {
+    if (stopping) return;
+    try {
+      incidentMonitor.sample(getStatus());
+      emitStatus();
+    } catch { console.warn('[v7-reliability-incident] sample_failed'); }
+  }, 15_000);
+  incidentTimer.unref();
   await startSocket();
 
   process.on('SIGINT', () => { shutdown(); });
