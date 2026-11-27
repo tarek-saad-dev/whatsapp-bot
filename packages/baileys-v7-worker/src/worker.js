@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash, randomUUID } from 'node:crypto';
-import { normalizeMirrorChat, normalizeMirrorMessage } from './mirrorSync.js';
+import { normalizeMirrorChat, normalizeMirrorMessage, confirmedCampaignMirror } from './mirrorSync.js';
 import { normalizeLabelEdit, normalizeLabelAssociation } from './labelSync.js';
 import { createDurableMirrorSpool } from './durableMirrorSpool.js';
 import { createHistoryPrivacyPolicy, allowsMirrorEvent, allowsMediaEvent } from './historyPrivacy.js';
@@ -790,6 +790,8 @@ async function handleSend({ phone, message, idempotencyKey }) {
       return { success: false, status: 'failed', code: 'NOT_READY', error: 'Account is not READY', httpStatus: 409 };
     }
     const messageId = generateMessageIDV2(sendingSocket.user?.id);
+    const startedAt = Date.now();
+    const senderDigits = ownAccountDigits();
     const release = pendingRetry.reserve({ id: messageId, remoteJid: jid, fromMe: true });
     let result;
     try {
@@ -808,6 +810,15 @@ async function handleSend({ phone, message, idempotencyKey }) {
       else if (Array.isArray(result) && result[0]?.key?.id) {
         providerMessageId = String(result[0].key.id);
       }
+    }
+    // Capture accepted campaign sends even when WhatsApp emits no own echo.
+    // Never convert a successful send into a failed/ambiguous send on capture error.
+    try {
+      const event = confirmedCampaignMirror({ result, expectedId: messageId, phone: digits, text, idempotencyKey, ownDigits: senderDigits, startedAt });
+      if (event && sock === sendingSocket && snapshot.ready && snapshot.lastConnectedAt === sendingConnectedAt) mirrorQueue(event);
+    } catch {
+      mirrorErrors++;
+      console.warn('[v7-sync] outbound_capture_failed');
     }
     // eslint-disable-next-line no-console
     console.log('[v7-worker-send]', JSON.stringify({

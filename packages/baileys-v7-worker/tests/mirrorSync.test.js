@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeMirrorChat, normalizeMirrorMessage } from '../src/mirrorSync.js';
+import { normalizeMirrorChat, normalizeMirrorMessage, confirmedCampaignMirror } from '../src/mirrorSync.js';
 
 test('history mirror uses the SAME inbound provider ID as live ingest', async () => {
   const result = await normalizeMirrorMessage({
@@ -46,4 +46,32 @@ test('groups and status updates never become business customer conversations', a
   const status = await normalizeMirrorChat({ id: 'status@broadcast' });
   assert.equal(group, null);
   assert.equal(status, null);
+});
+
+
+test('confirmed campaign creates the same mirror identity as a provider echo', async () => {
+  const phone = '201011747438';
+  const result = { key: { remoteJid: phone + '@s.whatsapp.net', id: 'actual-id', fromMe: true }, message: { conversation: 'campaign' }, messageTimestamp: 1760000000 };
+  const args = { result, expectedId: 'actual-id', phone, text: 'campaign', idempotencyKey: 'campaign:11111111-1111-4111-8111-111111111111:' + phone, ownDigits: '201099999999', startedAt: 1760000000000 };
+  const event = confirmedCampaignMirror(args);
+  const echo = await normalizeMirrorMessage(result, { ownDigits: args.ownDigits });
+  assert.equal(event.providerMessageId, echo.providerMessageId);
+  assert.equal(event.contactKey, echo.contactKey);
+  assert.equal(event.text, echo.text);
+  assert.equal(event.historical, false);
+  assert.equal(confirmedCampaignMirror({ ...args, expectedId: 'different' }), null);
+  assert.equal(confirmedCampaignMirror({ ...args, idempotencyKey: 'manual:example' }), null);
+  assert.equal(confirmedCampaignMirror({ ...args, result: { key: { ...result.key, fromMe: false } } }), null);
+  assert.equal(confirmedCampaignMirror({ ...args, result: { key: { ...result.key, remoteJid: '201022222222@s.whatsapp.net' } } }), null);
+  assert.equal(confirmedCampaignMirror({ ...args, ownDigits: phone }), null);
+});
+
+test('OTP echoes are redacted before journaling; inbound and ordinary outbound remain intact', async () => {
+  const text = 'رمز التحقق الخاص بك في حسابك: *123456*\nصالح لمدة 5 دقائق. لا تشارك الرمز مع أي شخص.';
+  const msg = { key: { remoteJid: '201011747438@s.whatsapp.net', id: 'otp', fromMe: true }, message: { conversation: text }, messageTimestamp: 1760000000 };
+  const event = await normalizeMirrorMessage(msg, { ownDigits: '201099999999' });
+  assert.ok(event.text.includes('تم إخفاء الرمز'));
+  assert.ok(!event.text.includes('123456'));
+  assert.equal((await normalizeMirrorMessage({ ...msg, key: { ...msg.key, fromMe: false } })).text, text);
+  assert.equal((await normalizeMirrorMessage({ ...msg, message: { conversation: 'normal text' } })).text, 'normal text');
 });
