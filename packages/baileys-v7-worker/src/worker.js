@@ -19,6 +19,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   Browsers,
   downloadMediaMessage,
+  generateMessageIDV2,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -29,6 +30,12 @@ import { buildV7InboundDto } from './dto.js';
 import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
 import { createRetryStore } from './retryStore.js';
+import { createPendingRetryBridge } from './pendingRetryBridge.js';
+import { createDeliveryEvidence } from './deliveryEvidence.js';
+import { createPeerCryptoHealth } from './peerCryptoHealth.js';
+import { createReconnectPolicy } from './reconnectPolicy.js';
+import { createIncidentMonitor } from './incidentMonitor.js';
+import { createIncidentStore } from './incidentStore.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -63,6 +70,16 @@ let labelEventsSeen = 0;
 let labelEventsSkipped = 0;
 const cryptoHealth = createCryptoHealth();
 const retryStore = createRetryStore();
+const pendingRetry = createPendingRetryBridge(retryStore);
+const deliveryEvidence = createDeliveryEvidence();
+const peerCryptoHealth = createPeerCryptoHealth();
+const reconnectPolicy = createReconnectPolicy();
+const incidentStore = createIncidentStore(path.join(AUTH_DIR, 'v7-reliability-incidents.json'));
+const incidentMonitor = createIncidentMonitor({ ...incidentStore, onTransition: event => {
+  console.info('[v7-reliability-incident]', JSON.stringify({ accountKeyPrefix: ACCOUNT_KEY.slice(0, 10), ...event }));
+} });
+let incidentTimer = null;
+let reconnectTimer = null;
 const retrySweepTimer = setInterval(() => retryStore.sweep(), 15_000);
 retrySweepTimer.unref();
 let deliveryBusy = false;
@@ -104,6 +121,8 @@ function emitStatus() {
 function setState(state, extra = {}) {
   snapshot.state = state;
   snapshot.ready = state === 'READY';
+  deliveryEvidence.setConnected(snapshot.ready);
+  peerCryptoHealth.setConnected(snapshot.ready);
   Object.assign(snapshot, extra);
   emitStatus();
 }
@@ -120,10 +139,14 @@ function getStatus() {
     lastDisconnectAt: snapshot.lastDisconnectAt,
     lastDisconnectCode: snapshot.lastDisconnectCode,
     lastErrorCode: snapshot.lastErrorCode,
-    reconnectAttempts: snapshot.reconnectAttempts,
+    reconnectAttempts: reconnectPolicy.snapshot().attempts,
+    socketRecovery: reconnectPolicy.snapshot(),
+    incidentMonitor: incidentMonitor.snapshot(),
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
-    outboundRetry: retryStore.stats(),
+    outboundRetry: { ...retryStore.stats(), early: pendingRetry.stats() },
+    deliveryEvidence: deliveryEvidence.snapshot(),
+    peerCryptoHealth: peerCryptoHealth.snapshot(),
     // The SaaS dashboard must distinguish a stopped delivery timer from an
     // older runtime omitting the liveness field. V6 already reports "running".
     inboundDelivery: deliverer ? {
@@ -513,6 +536,7 @@ function onMessagesUpsert(upsert) {
       continue;
     }
 
+    peerCryptoHealth.observe({ key, type, summary });
     const failurePmid = summary.messageId || msg?.key?.id || null;
     // Live media is mirrored as an attachment; live text stays on the
     // transactional /inbound AI scheduling path. Append history NEVER schedules.
@@ -521,6 +545,7 @@ function onMessagesUpsert(upsert) {
        || msg?.message?.stickerMessage) scheduleMirrorMessage(msg, type !== 'notify');
     if (summary.plaintextPresent === 'YES') {
       cryptoHealth.recordPlaintext();
+      deliveryEvidence.recordInbound(key, type, true);
       maybeDeliver(msg, type).catch((error) => {
         console.error('[v7-reliability] inbound_capture_failed', String(error?.code || error?.name || 'CAPTURE_ERROR'));
       });
@@ -564,11 +589,14 @@ async function startSocket() {
     syncFullHistory: process.env.V7_HISTORY_SYNC_ENABLED !== 'false',
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
-    getMessage: (key) => retryStore.getMessage(key),
+    getMessage: (key) => pendingRetry.getMessage(key),
   });
 
+  const currentSocket = sock;
+  let closed = false;
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async (update) => {
+    if (sock !== currentSocket || stopping || closed) return;
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       try {
@@ -578,11 +606,14 @@ async function startSocket() {
         setState(snapshot.state === 'QR_REQUIRED' ? 'QR_REQUIRED' : 'ERROR');
       }
     }
+    if (sock !== currentSocket || stopping || closed) return;
     if (connection === 'open') {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectPolicy.opened();
+      snapshot.lastErrorCode = null;
       snapshot.qr = null;
       snapshot.qrAvailable = false;
       snapshot.lastConnectedAt = new Date().toISOString();
-      snapshot.reconnectAttempts = 0;
       setState('READY');
     } else if (connection === 'connecting') {
       if (snapshot.state !== 'QR_REQUIRED') setState('CONNECTING');
@@ -590,6 +621,8 @@ async function startSocket() {
       const statusCode = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output?.statusCode
         : lastDisconnect?.error?.output?.statusCode;
+      closed = true;
+      const decision = reconnectPolicy.closed(statusCode);
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       snapshot.ready = false;
       snapshot.qrAvailable = false;
@@ -600,21 +633,39 @@ async function startSocket() {
         setState('LOGGED_OUT');
         return;
       }
-      snapshot.reconnectAttempts += 1;
+      if (decision.action !== 'RETRY_SCHEDULED') {
+        snapshot.lastErrorCode = decision.action;
+        setState('ERROR');
+        return;
+      }
       setState('DISCONNECTED');
-      if (!stopping && snapshot.reconnectAttempts < 20) {
-        setTimeout(() => {
-          startSocket().catch((e) => {
+      if (!stopping && !reconnectTimer) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (stopping || sock !== currentSocket || snapshot.state !== 'DISCONNECTED') return;
+          setState('CONNECTING');
+          startSocket().catch(() => {
+            if (stopping) return;
+            reconnectPolicy.startFailed();
             snapshot.lastErrorCode = 'RECONNECT_FAILED';
             setState('ERROR');
-            // eslint-disable-next-line no-console
-            console.error('[v7-worker] reconnect_failed', String(e?.message || e).slice(0, 120));
+            console.error('[v7-worker] reconnect_failed');
           });
-        }, Math.min(30_000, 1000 * snapshot.reconnectAttempts));
+        }, decision.delayMs);
       }
     }
   });
-  sock.ev.on('messages.upsert', onMessagesUpsert);
+  sock.ev.on('messages.upsert', (update) => {
+    if (sock === currentSocket && !stopping && !closed) onMessagesUpsert(update);
+  });
+  sock.ev.on('messages.update', (updates) => {
+    if (sock !== currentSocket || stopping || closed) return;
+    let changed = false;
+    for (const item of Array.isArray(updates) ? updates : []) {
+      if (deliveryEvidence.recordUpdate(item?.key, item?.update?.status)) changed = true;
+    }
+    if (changed) emitStatus();
+  });
   sock.ev.on('messaging-history.set', onHistorySet);
   sock.ev.on('labels.edit', scheduleLabelEdit);
   sock.ev.on('labels.association', scheduleLabelAssociation);
@@ -663,8 +714,25 @@ async function handleSend({ phone, message, idempotencyKey }) {
 
   return enqueueSend(async () => {
     const jid = `${digits}@s.whatsapp.net`;
-    const result = await sock.sendMessage(jid, { text });
-    if (result?.key?.id && result?.message) retryStore.put(result.key, result.message, jid);
+    const sendingSocket = sock;
+    const sendingConnectedAt = snapshot.lastConnectedAt;
+    // Check again after waiting in the send queue; no send on a stopped socket.
+    if (!sendingSocket || stopping || !snapshot.ready) {
+      return { success: false, status: 'failed', code: 'NOT_READY', error: 'Account is not READY', httpStatus: 409 };
+    }
+    const messageId = generateMessageIDV2(sendingSocket.user?.id);
+    const release = pendingRetry.reserve({ id: messageId, remoteJid: jid, fromMe: true });
+    let result;
+    try {
+      result = await sendingSocket.sendMessage(jid, { text }, { messageId });
+      if (result?.key?.id && result?.message) retryStore.put(result.key, result.message, jid);
+    } finally {
+      release();
+    }
+    if (sock === sendingSocket && snapshot.ready && snapshot.lastConnectedAt === sendingConnectedAt) {
+      deliveryEvidence.recordSent(result?.key, jid);
+      emitStatus();
+    }
     let providerMessageId = null;
     if (result && typeof result === 'object') {
       if (result.key && result.key.id) providerMessageId = String(result.key.id);
@@ -695,7 +763,11 @@ async function handleSend({ phone, message, idempotencyKey }) {
 
 async function shutdown() {
   stopping = true;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectPolicy.stopped();
+  if (incidentTimer) { clearInterval(incidentTimer); incidentTimer = null; }
   clearInterval(retrySweepTimer);
+  pendingRetry.clear();
   retryStore.clear();
   if (inboundTimer) clearInterval(inboundTimer);
   if (receiptTimer) clearInterval(receiptTimer);
@@ -778,6 +850,14 @@ async function main() {
   void flushInboundSpool();
   void reportInboundReceipts();
   setState('STARTING');
+  incidentTimer = setInterval(() => {
+    if (stopping) return;
+    try {
+      incidentMonitor.sample(getStatus());
+      emitStatus();
+    } catch { console.warn('[v7-reliability-incident] sample_failed'); }
+  }, 15_000);
+  incidentTimer.unref();
   await startSocket();
 
   process.on('SIGINT', () => { shutdown(); });
