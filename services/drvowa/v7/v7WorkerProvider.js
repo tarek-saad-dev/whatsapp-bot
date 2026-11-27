@@ -347,6 +347,7 @@ function createV7WorkerProvider({
       ...lastStatus,
       authDir,
       runtimeEngine: 'BAILEYS_V7',
+      peerCryptoHealth: lastStatus.ready ? (lastStatus.peerCryptoHealth ?? null) : null,
       deliveryEvidence: lastStatus.ready ? (lastStatus.deliveryEvidence ?? null) : {
         status: 'NOT_CONNECTED', lastLivePlaintextAt: null, lastOutboundDeliveryAckAt: null, pendingReceiptCount: 0,
       },

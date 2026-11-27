@@ -30,6 +30,7 @@ import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
 import { createRetryStore } from './retryStore.js';
 import { createDeliveryEvidence } from './deliveryEvidence.js';
+import { createPeerCryptoHealth } from './peerCryptoHealth.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -65,6 +66,7 @@ let labelEventsSkipped = 0;
 const cryptoHealth = createCryptoHealth();
 const retryStore = createRetryStore();
 const deliveryEvidence = createDeliveryEvidence();
+const peerCryptoHealth = createPeerCryptoHealth();
 const retrySweepTimer = setInterval(() => retryStore.sweep(), 15_000);
 retrySweepTimer.unref();
 let deliveryBusy = false;
@@ -107,6 +109,7 @@ function setState(state, extra = {}) {
   snapshot.state = state;
   snapshot.ready = state === 'READY';
   deliveryEvidence.setConnected(snapshot.ready);
+  peerCryptoHealth.setConnected(snapshot.ready);
   Object.assign(snapshot, extra);
   emitStatus();
 }
@@ -128,6 +131,7 @@ function getStatus() {
     cryptoHealth: cryptoHealth.snapshot(),
     outboundRetry: retryStore.stats(),
     deliveryEvidence: deliveryEvidence.snapshot(),
+    peerCryptoHealth: peerCryptoHealth.snapshot(),
     // The SaaS dashboard must distinguish a stopped delivery timer from an
     // older runtime omitting the liveness field. V6 already reports "running".
     inboundDelivery: deliverer ? {
@@ -517,6 +521,7 @@ function onMessagesUpsert(upsert) {
       continue;
     }
 
+    peerCryptoHealth.observe({ key, type, summary });
     const failurePmid = summary.messageId || msg?.key?.id || null;
     // Live media is mirrored as an attachment; live text stays on the
     // transactional /inbound AI scheduling path. Append history NEVER schedules.
