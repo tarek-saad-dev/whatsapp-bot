@@ -28,6 +28,7 @@ import { summarizeInbound, logInboundSafe } from './safeLog.js';
 import { buildV7InboundDto } from './dto.js';
 import { createSaasDeliverer, buildIngestUrl } from './saasDeliver.js';
 import { createCryptoHealth } from './cryptoHealth.js';
+import { createRetryStore } from './retryStore.js';
 import { buildV7OutboundObservation } from './outboundObserve.js';
 import { blockedSourceReason } from './sourcePolicy.js';
 
@@ -61,6 +62,9 @@ let mirrorErrors = 0;
 let labelEventsSeen = 0;
 let labelEventsSkipped = 0;
 const cryptoHealth = createCryptoHealth();
+const retryStore = createRetryStore();
+const retrySweepTimer = setInterval(() => retryStore.sweep(), 15_000);
+retrySweepTimer.unref();
 let deliveryBusy = false;
 let receiptBusy = false;
 let inboundTimer = null;
@@ -119,6 +123,7 @@ function getStatus() {
     reconnectAttempts: snapshot.reconnectAttempts,
     authDir: AUTH_DIR,
     cryptoHealth: cryptoHealth.snapshot(),
+    outboundRetry: retryStore.stats(),
     // The SaaS dashboard must distinguish a stopped delivery timer from an
     // older runtime omitting the liveness field. V6 already reports "running".
     inboundDelivery: deliverer ? {
@@ -559,6 +564,7 @@ async function startSocket() {
     syncFullHistory: process.env.V7_HISTORY_SYNC_ENABLED !== 'false',
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
+    getMessage: (key) => retryStore.getMessage(key),
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -658,6 +664,7 @@ async function handleSend({ phone, message, idempotencyKey }) {
   return enqueueSend(async () => {
     const jid = `${digits}@s.whatsapp.net`;
     const result = await sock.sendMessage(jid, { text });
+    if (result?.key?.id && result?.message) retryStore.put(result.key, result.message, jid);
     let providerMessageId = null;
     if (result && typeof result === 'object') {
       if (result.key && result.key.id) providerMessageId = String(result.key.id);
@@ -688,6 +695,8 @@ async function handleSend({ phone, message, idempotencyKey }) {
 
 async function shutdown() {
   stopping = true;
+  clearInterval(retrySweepTimer);
+  retryStore.clear();
   if (inboundTimer) clearInterval(inboundTimer);
   if (receiptTimer) clearInterval(receiptTimer);
   if (mirrorTimer) clearInterval(mirrorTimer);
