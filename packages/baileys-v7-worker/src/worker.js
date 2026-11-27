@@ -207,6 +207,7 @@ async function maybeObserveOutbound(msg) {
     resolveLidPn,
     ownDigits: ownAccountDigits(),
   });
+  if (built.ok && !(await contactAllowed(built.observation.phone))) return;
   if (!built.ok) {
     // eslint-disable-next-line no-console
     console.log('[v7-worker-outbound] skip', JSON.stringify({ reason: built.reason }));
@@ -250,7 +251,7 @@ async function maybeDeliver(msg, upsertType) {
     upsertType,
     resolveLidPn,
   });
-  if (!built.ok) return;
+  if (!built.ok || !(await contactAllowed(built.dto.externalContactKey))) return;
   // Commit before network IO. A crash or network failure cannot lose a plaintext
   // captured message; retries use the same providerMessageId / SaaS dedup key.
   inboundSpool.capture(built.dto, { drvowaDto: built.dto });
@@ -261,7 +262,10 @@ async function flushInboundSpool() {
   if (deliveryBusy || stopping || !deliverer?.configured()) return;
   deliveryBusy = true;
   try {
-    for (const item of inboundSpool.getPendingForDelivery().slice(0, 40)) {
+    await historyPrivacy.get();
+    for (const item of inboundSpool.getPendingForDelivery().filter(item =>
+      historyPrivacy.contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey)).slice(0, 40)) {
+      if (!(await contactAllowed((item.drvowaDto || item.normalizedEvent)?.externalContactKey))) continue;
       const outcome = await deliverer.deliver(item.drvowaDto || item.normalizedEvent);
       if (outcome.ok) {
         inboundSpool.markDelivered(item.providerMessageId);
@@ -316,8 +320,15 @@ async function reportInboundReceipts() {
   } finally { receiptBusy = false; }
 }
 
+async function contactAllowed(key) {
+  await historyPrivacy.get();
+  return historyPrivacy.contactAllowed(key);
+}
+function eventContactAllowed(event) {
+  return event?.kind === 'label' ? historyPrivacy.metadataAllowed() : historyPrivacy.contactAllowed(event?.contactKey);
+}
 function mirrorQueue(event) {
-  if (!allowsMirrorEvent(event, historyPrivacy.current())) return;
+  if (!allowsMirrorEvent(event, historyPrivacy.current()) || !eventContactAllowed(event)) return;
   // No AI decisions here. The SaaS /sync endpoint is observational-only.
   // Historical provider IDs are identical to live IDs, avoiding duplicate rows.
   const identity = event.kind === 'message'
@@ -339,7 +350,7 @@ async function mirrorMessage(msg, historical) {
     ownDigits: ownAccountDigits(),
     historical,
   });
-  if (event) {
+  if (event && await contactAllowed(event.contactKey)) {
     mirrorQueue(event);
     if (['IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT', 'STICKER'].includes(event.contentType)) {
       mediaChain = mediaChain.then(() => cacheMedia(msg, event)).catch(error => {
@@ -353,18 +364,18 @@ async function mirrorMessage(msg, historical) {
 async function mirrorChat(chat) {
   if (await historyPrivacy.get() !== 'allow') return;
   const event = await normalizeMirrorChat(chat, { resolveLidPn: localLidToPn });
-  if (event) mirrorQueue(event);
+  if (event && await contactAllowed(event.contactKey)) mirrorQueue(event);
 }
 
 async function cacheMedia(msg, event) {
-  if (!allowsMirrorEvent(event, event.historical ? await historyPrivacy.get() : historyPrivacy.current())) return;
+  if (!(await contactAllowed(event.contactKey)) || !allowsMirrorEvent(event, historyPrivacy.current())) return;
   if (event.fileSize && event.fileSize > MAX_MEDIA_BYTES) return;
   const id = 'media:' + event.providerMessageId;
   if (mediaSpool.hasProviderMessageId(id)) return;
   const downloaded = await downloadMediaMessage(msg, 'buffer', {}, {
     logger, reuploadRequest: sock?.updateMediaMessage?.bind(sock),
   });
-  if (!allowsMirrorEvent(event, event.historical ? await historyPrivacy.get() : historyPrivacy.current())) return;
+  if (!(await contactAllowed(event.contactKey)) || !allowsMirrorEvent(event, historyPrivacy.current())) return;
   const bytes = Buffer.from(downloaded);
   if (!bytes.length || bytes.length>MAX_MEDIA_BYTES) return;
   const key = createHash('sha256').update(id).digest('hex');
@@ -379,6 +390,7 @@ async function cacheMedia(msg, event) {
       mimeType: String(event.mimeType || 'application/octet-stream').split(';')[0].trim(),
       fileName: event.fileName || '',
       historical: event.historical,
+      contactKey: event.contactKey,
     },
   });
   void flushMediaSpool();
@@ -390,12 +402,12 @@ async function flushMediaSpool() {
   try {
     const policy = await historyPrivacy.get();
     const pending = mediaSpool.getPendingForDelivery()
-      .filter(row => allowsMediaEvent(row.normalizedEvent.payload, policy)).slice(0, 6);
+      .filter(row => allowsMediaEvent(row.normalizedEvent.payload, policy) && historyPrivacy.contactAllowed(row.normalizedEvent.payload?.contactKey)).slice(0, 6);
     if (!pending.length) return;
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (const row of pending) {
       const m = row.normalizedEvent.payload;
-      if (!allowsMediaEvent(m, historyPrivacy.current())) continue;
+      if (!(await contactAllowed(m.contactKey)) || !allowsMediaEvent(m, historyPrivacy.current())) continue;
       let success = false;
       let code = 'MEDIA_NETWORK';
       try {
@@ -436,11 +448,11 @@ async function flushMirrorSpool() {
   try {
     const policy = await historyPrivacy.get();
     const pending = mirrorSpool.getPendingForDelivery()
-      .filter(row => allowsMirrorEvent(row.normalizedEvent.payload, policy)).slice(0, 24);
+      .filter(row => allowsMirrorEvent(row.normalizedEvent.payload, policy) && eventContactAllowed(row.normalizedEvent.payload)).slice(0, 24);
     if (!pending.length) return;
     const base = String(process.env.DRVOWA_SAAS_BASE_URL || 'http://127.0.0.1:3100').replace(/[/]+$/, '');
     for (let i = 0; i < pending.length; i += 6) {
-      const batch = pending.slice(i, i + 6).filter(item => allowsMirrorEvent(item.normalizedEvent.payload, historyPrivacy.current()));
+      const batch = pending.slice(i, i + 6).filter(item => allowsMirrorEvent(item.normalizedEvent.payload, historyPrivacy.current()) && eventContactAllowed(item.normalizedEvent.payload));
       if (!batch.length) continue;
       let okay = false;
       let errorCode = 'NETWORK';
@@ -713,6 +725,9 @@ function enqueueSend(fn) {
 }
 
 async function handleSend({ phone, message, idempotencyKey }) {
+  if (!(await contactAllowed(normalizePhoneDigits(phone)))) {
+    return { success: false, status: 'failed', error: 'Privacy policy blocks destination or is unavailable', code: 'PRIVATE_CONTACT_OR_POLICY_UNAVAILABLE', httpStatus: 403 };
+  }
   if (snapshot.state !== 'READY' || !sock) {
     return {
       success: false,

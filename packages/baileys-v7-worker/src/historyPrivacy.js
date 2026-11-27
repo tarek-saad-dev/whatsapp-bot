@@ -4,6 +4,7 @@ export function createHistoryPrivacyPolicy({
   fetchFn = globalThis.fetch, now = Date.now,
 }) {
   let state = 'unknown';
+  let privatePhones = null;
   let expiresAt = 0;
   let inFlight = null;
   function current() {
@@ -11,9 +12,8 @@ export function createHistoryPrivacyPolicy({
     return now() < expiresAt ? state : 'unknown';
   }
   async function get({ force = false } = {}) {
-    if (!enabled) return 'fresh';
     if (!token || !accountKey) return 'unknown';
-    if (!force && now() < expiresAt) return state;
+    if (!force && now() < expiresAt) return current();
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
@@ -25,17 +25,30 @@ export function createHistoryPrivacyPolicy({
         });
         if (!response.ok) throw new Error('POLICY_UNAVAILABLE');
         const body = await response.json();
+        privatePhones = Array.isArray(body.privateContactPhones) && body.privateContactPhones.length <= 100 &&
+          body.privateContactPhones.every(p => typeof p === 'string' && /^[1-9]\d{7,14}$/.test(p))
+          ? body.privateContactPhones : null;
         state = body.historyImportEnabled === true ? 'allow'
           : body.historyImportEnabled === false ? 'fresh' : 'unknown';
       } catch {
         state = 'unknown';
+        privatePhones = null;
       }
       expiresAt = now() + ttlMs;
-      return state;
+      return current();
     })();
     try { return await inFlight; } finally { inFlight = null; }
   }
-  return { get, current };
+  function contactAllowed(key) {
+    if (now() >= expiresAt || privatePhones === null) return false;
+    if (!privatePhones.length) return true;
+    const match = /^\+?([1-9]\d{7,14})(?:@(?:s\.whatsapp\.net|c\.us))?$/i.exec(String(key || ''));
+    return Boolean(match && !privatePhones.includes(match[1]));
+  }
+  function metadataAllowed() {
+    return now() < expiresAt && privatePhones !== null && privatePhones.length === 0;
+  }
+  return { get, current, contactAllowed, metadataAllowed };
 }
 
 export function allowsMirrorEvent(event, policy) {
